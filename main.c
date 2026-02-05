@@ -5,8 +5,9 @@
 #include "raylib.h"
 
 #define HIT_FRAMES_NUM      4
-#define IDLE_DURATION       10
-#define HIT_DURATION        5
+#define IDLE_DURATION       20
+#define INPUT_MODE_DURATION 15
+#define HIT_DURATION        20
 #define PLAYER_STATE_CAPACITY 12
 
 typedef struct
@@ -41,6 +42,8 @@ typedef struct
     size_t state_index;
 } Player;
 PlayerState IDLE_STATE = {.kind = IDLE, .duration = IDLE_DURATION, .cnt = 0};
+PlayerState INPUT_MODE_STATE = {.kind = INPUT_MODE, .duration = INPUT_MODE_DURATION, .cnt = 0};
+PlayerState HIT_MODE_STATE = {.kind = HIT, .duration = HIT_DURATION, .cnt = 0};
 
 
 bool draw_player(Player* player, size_t current_frame_cnt, Animation* animations)
@@ -65,6 +68,19 @@ bool draw_player(Player* player, size_t current_frame_cnt, Animation* animations
     return true;
 }
 
+bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stages_num, size_t frames_dur)
+{
+    anim->texture = texture;
+    anim->stages_num = stages_num;
+    anim->frame_rect.x = 0;
+    anim->frame_rect.y = 0;
+    anim->frame_rect.width = anim->texture.width/stages_num;
+    anim->frame_rect.height = anim->texture.height;
+    anim->frames_dur = frames_dur;
+    anim->current_frame_cnt = 0;
+    anim->start_frame_cnt = 0;
+    return true;
+}
 
 bool init_animation_from_image(const char * path, Animation* anim, size_t stages_num, size_t frames_dur)
 {
@@ -80,6 +96,34 @@ bool init_animation_from_image(const char * path, Animation* anim, size_t stages
     return true;
 }
 
+bool init_animation_from_image_roi(const char * path, Animation* anim, size_t stages_num, size_t frames_dur, Rectangle roi)
+{
+    anim->texture = LoadTexture(path);
+    anim->stages_num = stages_num;
+    anim->frame_rect.x = roi.x;
+    anim->frame_rect.y = roi.y;
+    anim->frame_rect.width = roi.width/stages_num;
+    anim->frame_rect.height = anim->texture.height;
+    anim->frames_dur = frames_dur;
+    anim->current_frame_cnt = 0;
+    anim->start_frame_cnt = 0;
+    return true;
+}
+
+void enter_input_mode(Player* player)
+{
+    PlayerState* current_state = &player->state[player->state_index];
+    memcpy(&player->state[player->state_index], &INPUT_MODE_STATE, sizeof(PlayerState));
+}
+
+void process_game_state(Player* player)
+{
+    PlayerState* current_state = &player->state[player->state_index];
+    if ((current_state->kind == INPUT_MODE) && (current_state->duration == current_state->cnt))
+    {
+        memcpy(&player->state[player->state_index], &HIT_MODE_STATE, sizeof(PlayerState));
+    }
+}   
 int main(void)
 {
 
@@ -94,9 +138,21 @@ int main(void)
 
     InitWindow(screenWidth, screenHeight, "raylib [textures] example - sprite animation");
     Animation animations[PLAYER_STATE_KIND_CAPACITY];
+    Image idle_image = LoadImage("assets/Knight_1/Idle.png");
+    Image attack_image = LoadImage("assets/Knight_1/Attack 3.png");
+    Image input_image = ImageCopy(attack_image);
+    Image hit_image = ImageCopy(attack_image);
+    ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = attack_image.width/4, .height = attack_image.height});
+    ImageCrop(&hit_image, (Rectangle){.x = attack_image.width/4, .y = 0, .width = 3*attack_image.width/4, .height = attack_image.height});
+    Texture2D input_texture = LoadTextureFromImage(input_image);
+    Texture2D hit_texture = LoadTextureFromImage(hit_image);
+
 
     init_animation_from_image("assets/Knight_1/Idle.png", &animations[IDLE], 4, IDLE_DURATION);
-    init_animation_from_image("assets/Knight_1/Attack 2.png", &animations[HIT], 4, HIT_DURATION);
+    // Rectangle input_animation_roi = {.x = 0, .y = 0, .height = animations[HIT].frame_rect.height, .width = animations[HIT].frame_rect.width};
+    init_animation_from_texture(hit_texture, &animations[HIT], 3, HIT_DURATION);
+    // Rectangle input_animation_roi = {.x = 0, .y = 0, .height = animations[HIT].frame_rect.height, .width = animations[HIT].frame_rect.width};
+    init_animation_from_texture(input_texture, &animations[INPUT_MODE], 1, INPUT_MODE_DURATION);
 
     int currentFrame = 0;
 
@@ -112,8 +168,11 @@ int main(void)
         BeginDrawing();
 
         ClearBackground(RAYWHITE);
-
-
+        if (IsKeyPressed(KEY_I))
+        {
+            enter_input_mode(&player);
+        }
+        process_game_state(&player);
         // DrawText(TextFormat("%02i FPS", framesSpeed), 575, 210, 10, DARKGRAY);
 
         // bool draw_player(Player* player, size_t current_frame_cnt, Animation* animations)
