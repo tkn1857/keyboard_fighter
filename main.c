@@ -111,7 +111,7 @@ bool draw_player(Player* player, size_t current_frame_cnt, Animation* animations
     size_t animation_frame = ((float)current_state->cnt/(float)current_state->duration) * animation->stages_num;
     Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
     // printf("%ld,%ld,%ld, %f %f \n", current_state->cnt, current_state->duration,  animation_frame,  frame_rect.x, frame_rect.y);
-    Vector2 texture_position = {.x = player->position.x,  .y = player->position.y};
+    Vector2 texture_position = {.x = player->position.x - 30,  .y = player->position.y - animation->texture.height};
     DrawTextureRec(animation->texture, frame_rect, texture_position, WHITE);
     DrawCircle(player->position.x , player->position.y, 5, GREEN);
     frame_rect.x = texture_position.x;
@@ -163,7 +163,7 @@ bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stag
 void enter_input_mode(Player* player)
 {
     PlayerState* current_state = &player->state[player->state_index];
-    if (current_state->kind != INPUT_MODE)
+    if ((current_state->kind != INPUT_MODE) && (current_state->kind != HIT))
     {
         memcpy(&player->state[player->state_index], &INPUT_MODE_STATE, sizeof(PlayerState));
     }
@@ -209,7 +209,7 @@ void process_game_state(Player* player)
 int main(void)
 {
 
-    Vector2 player_position = { 350.0f, 280.0f };
+    Vector2 player_position = { 350.0f, 400.0f };
     Player player = {.position = player_position, .state_index = 0};    
     for(size_t i = 0; i < PLAYER_STATE_CAPACITY; i++)
     {
@@ -240,7 +240,7 @@ int main(void)
     init_animation_from_texture(idle_texture, &animations[IDLE], 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
     init_animation_from_texture(hit_texture, &animations[HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
     init_animation_from_texture(input_texture, &animations[INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
-    init_animation_from_texture(walk_left_texture , &animations[WALK_LEFT], 8, 50, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
+    init_animation_from_texture(walk_left_texture , &animations[WALK_LEFT], 8, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
     init_animation_from_texture(walk_right_texture , &animations[WALK_RIGHT], 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
 
 
@@ -254,7 +254,7 @@ int main(void)
 
     int framesCounter = 0;
 
-    SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
+    SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
     while (!WindowShouldClose())    // Detect window close button or ESC key
