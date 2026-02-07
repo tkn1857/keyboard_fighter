@@ -9,6 +9,14 @@
 #define INPUT_MODE_DURATION 15
 #define HIT_DURATION        20
 #define PLAYER_STATE_CAPACITY 12
+#define IDLE_ANIMATION_FRAMES 4
+#define HIT_ANIMATION_FRAMES  3
+#define INPUT_ANIMATION_FRAMES 1
+
+
+#define WALK_ANIMATION_FRAMES 8
+#define WALK_ANIMATION_DURATION_FRAMES 100
+#define WALK_INCREMENT_PIXEL_PER_FRAME 1 
 
 typedef struct
 {
@@ -25,6 +33,8 @@ typedef enum
     IDLE = 0,
     INPUT_MODE,
     HIT,
+    WALK_LEFT,
+    WALK_RIGHT,
     PLAYER_STATE_KIND_CAPACITY
 } PlayerStateKind;
 
@@ -44,6 +54,32 @@ typedef struct
 PlayerState IDLE_STATE = {.kind = IDLE, .duration = IDLE_DURATION, .cnt = 0};
 PlayerState INPUT_MODE_STATE = {.kind = INPUT_MODE, .duration = INPUT_MODE_DURATION, .cnt = 0};
 PlayerState HIT_MODE_STATE = {.kind = HIT, .duration = HIT_DURATION, .cnt = 0};
+PlayerState WALK_MODE_STATE = {.kind = WALK_LEFT, .duration = WALK_ANIMATION_DURATION_FRAMES, .cnt = 0};
+
+
+
+
+void walk_start(Player* player, PlayerStateKind kind)
+{
+
+    PlayerState* current_state = &player->state[player->state_index];
+    if (current_state->kind == IDLE)
+    {
+        memcpy(&player->state[player->state_index], &WALK_MODE_STATE, sizeof(PlayerState));
+        current_state->kind = kind;
+    }
+}
+
+
+void walk_stop(Player* player)
+{
+
+    PlayerState* current_state = &player->state[player->state_index];
+    if ((current_state->kind == WALK_LEFT) || (current_state->kind == WALK_RIGHT))
+    {
+        memcpy(&player->state[player->state_index], &IDLE_STATE, sizeof(PlayerState));
+    }
+}
 
 
 bool draw_player(Player* player, size_t current_frame_cnt, Animation* animations)
@@ -120,10 +156,40 @@ void process_game_state(Player* player)
 {
     PlayerState* current_state = &player->state[player->state_index];
     if ((current_state->kind == INPUT_MODE) && (current_state->duration == current_state->cnt))
-    {
+    { 
         memcpy(&player->state[player->state_index], &HIT_MODE_STATE, sizeof(PlayerState));
     }
+
+    if ((current_state->kind == WALK_LEFT) || (current_state->kind == WALK_RIGHT))
+    {
+
+    }
+    switch(current_state->kind)
+    {
+        case INPUT_MODE:
+        {
+            if (current_state->duration == current_state->cnt)
+            {
+                memcpy(&player->state[player->state_index], &HIT_MODE_STATE, sizeof(PlayerState));
+            }
+            break;
+        }
+        case WALK_LEFT:
+        {
+            player->position.x -= WALK_INCREMENT_PIXEL_PER_FRAME;
+            break;
+        }
+        case WALK_RIGHT:
+        {
+
+            player->position.x += WALK_INCREMENT_PIXEL_PER_FRAME;
+            break;        
+        }
+    }
 }   
+
+
+
 int main(void)
 {
 
@@ -146,14 +212,27 @@ int main(void)
     ImageCrop(&hit_image, (Rectangle){.x = attack_image.width/4, .y = 0, .width = 3*attack_image.width/4, .height = attack_image.height});
     Texture2D input_texture = LoadTextureFromImage(input_image);
     Texture2D hit_texture = LoadTextureFromImage(hit_image);
+    Image walk_right_image = LoadImage("assets/Knight_1/Walk.png");
+    Image walk_left_image = ImageCopy(walk_right_image);
+    ImageFlipHorizontal(&walk_left_image);
+    Texture2D walk_left_texture = LoadTextureFromImage(walk_left_image);
+
+    Texture2D walk_right_texture = LoadTextureFromImage(walk_right_image);
 
 
-    init_animation_from_image("assets/Knight_1/Idle.png", &animations[IDLE], 4, IDLE_DURATION);
-    // Rectangle input_animation_roi = {.x = 0, .y = 0, .height = animations[HIT].frame_rect.height, .width = animations[HIT].frame_rect.width};
-    init_animation_from_texture(hit_texture, &animations[HIT], 3, HIT_DURATION);
-    // Rectangle input_animation_roi = {.x = 0, .y = 0, .height = animations[HIT].frame_rect.height, .width = animations[HIT].frame_rect.width};
-    init_animation_from_texture(input_texture, &animations[INPUT_MODE], 1, INPUT_MODE_DURATION);
+    init_animation_from_image("assets/Knight_1/Idle.png", &animations[IDLE], IDLE_ANIMATION_FRAMES, IDLE_DURATION);
+    init_animation_from_texture(hit_texture, &animations[HIT], HIT_ANIMATION_FRAMES, HIT_DURATION);
+    init_animation_from_texture(input_texture, &animations[INPUT_MODE], INPUT_ANIMATION_FRAMES, INPUT_MODE_DURATION);
+    init_animation_from_texture(walk_left_texture , &animations[WALK_LEFT], WALK_ANIMATION_FRAMES, WALK_ANIMATION_DURATION_FRAMES );
+    init_animation_from_texture(walk_right_texture , &animations[WALK_RIGHT], WALK_ANIMATION_FRAMES, WALK_ANIMATION_DURATION_FRAMES );
 
+
+    UnloadImage(idle_image);
+    UnloadImage(attack_image);
+    UnloadImage(input_image);
+    UnloadImage(hit_image);
+    UnloadImage(walk_right_image);
+    UnloadImage(walk_left_image);
     int currentFrame = 0;
 
     int framesCounter = 0;
@@ -172,10 +251,15 @@ int main(void)
         {
             enter_input_mode(&player);
         }
-        process_game_state(&player);
-        // DrawText(TextFormat("%02i FPS", framesSpeed), 575, 210, 10, DARKGRAY);
+        if (IsKeyDown(KEY_L)) walk_start(&player, WALK_RIGHT);
+        if (IsKeyDown(KEY_H)) walk_start(&player, WALK_LEFT);
 
-        // bool draw_player(Player* player, size_t current_frame_cnt, Animation* animations)
+
+        // RLAPI bool IsKeyReleased(int key);                            // Check if a key has been released once
+        if(IsKeyReleased(KEY_L)) walk_stop(&player);
+        if(IsKeyReleased(KEY_H)) walk_stop(&player);
+
+        process_game_state(&player);
         draw_player(&player, framesCounter, animations);
         // DrawTextureRec(scarfy, frameRec, position, WHITE);  // Draw part of the texture
 
@@ -188,6 +272,7 @@ int main(void)
     //--------------------------------------------------------------------------------------
     UnloadTexture(animations[IDLE].texture);
     UnloadTexture(animations[HIT].texture);
+    UnloadTexture(animations[INPUT_MODE].texture);
 
     CloseWindow();                // Close window and OpenGL context
     //--------------------------------------------------------------------------------------
