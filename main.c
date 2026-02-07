@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include "raylib.h"
 
+#define KNIGHT_FIGURE_WIDTH_PX  64
+#define KNIGHT_FIGURE_OFFSET    64
+
+
 #define HIT_FRAMES_NUM      4
 #define IDLE_DURATION       20
 #define INPUT_MODE_DURATION 15
@@ -15,17 +19,16 @@
 
 
 #define WALK_ANIMATION_FRAMES 8
-#define WALK_ANIMATION_DURATION_FRAMES 100
-#define WALK_INCREMENT_PIXEL_PER_FRAME 1 
+#define WALK_ANIMATION_DURATION_FRAMES 50 
+#define WALK_INCREMENT_PIXEL_PER_FRAME 2 
 
 typedef struct
 {
     Texture2D texture;
-    Rectangle frame_rect;
     size_t stages_num;
-    size_t frames_dur;
-    size_t start_frame_cnt;
-    size_t current_frame_cnt; 
+    size_t start_offset_pixel;
+    size_t offset_between_stages;
+    size_t figure_width;
 } Animation;
 
 typedef enum 
@@ -82,74 +85,88 @@ void walk_stop(Player* player)
 }
 
 
+Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
+{
+    Rectangle frame_rect = {0};
+    frame_rect.y = 0;
+    frame_rect.x = anim->start_offset_pixel + frame_num * (anim->offset_between_stages + anim->figure_width);
+    frame_rect.width =  anim->figure_width * 2;
+    frame_rect.height = anim->texture.height;
+    return frame_rect;
+}
+
 bool draw_player(Player* player, size_t current_frame_cnt, Animation* animations)
 {
-
     PlayerState* current_state = &player->state[player->state_index];
     if (current_state->duration == current_state->cnt)
     {
-        memcpy(&player->state[player->state_index], &IDLE_STATE, sizeof(PlayerState));
-        player->state_index = (player->state_index + 1) % PLAYER_STATE_CAPACITY;
-        current_state = &player->state[player->state_index];
+        if ((current_state->kind != WALK_LEFT) && (current_state->kind != WALK_RIGHT))
+        {
+            memcpy(&player->state[player->state_index], &IDLE_STATE, sizeof(PlayerState));
+            player->state_index = (player->state_index + 1) % PLAYER_STATE_CAPACITY;
+            current_state = &player->state[player->state_index];
+        }
     } 
     Animation * animation = &animations[current_state->kind];
     size_t animation_frame = ((float)current_state->cnt/(float)current_state->duration) * animation->stages_num;
-    Rectangle frame_rect = {0};
-    frame_rect.x = (float)animation_frame*(float)animation->frame_rect.width;
-    frame_rect.width = animation->frame_rect.width;
-    frame_rect.height = animation->frame_rect.height;
+    Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
     // printf("%ld,%ld,%ld, %f %f \n", current_state->cnt, current_state->duration,  animation_frame,  frame_rect.x, frame_rect.y);
-    DrawTextureRec(animation->texture, frame_rect, player->position, WHITE);
+    Vector2 texture_position = {.x = player->position.x,  .y = player->position.y};
+    DrawTextureRec(animation->texture, frame_rect, texture_position, WHITE);
+    DrawCircle(player->position.x , player->position.y, 5, GREEN);
+    frame_rect.x = texture_position.x;
+    frame_rect.y = texture_position.y;
+    DrawRectangleLinesEx(frame_rect, 2, RED);
     current_state->cnt++;
     return true;
 }
 
-bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stages_num, size_t frames_dur)
+
+bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stages_num, size_t start_offset_pixel, size_t offset_between_stages, size_t figure_width)
 {
     anim->texture = texture;
     anim->stages_num = stages_num;
-    anim->frame_rect.x = 0;
-    anim->frame_rect.y = 0;
-    anim->frame_rect.width = anim->texture.width/stages_num;
-    anim->frame_rect.height = anim->texture.height;
-    anim->frames_dur = frames_dur;
-    anim->current_frame_cnt = 0;
-    anim->start_frame_cnt = 0;
+    anim->start_offset_pixel = start_offset_pixel;
+    anim->offset_between_stages = offset_between_stages;
+    anim->figure_width = figure_width;
     return true;
 }
 
-bool init_animation_from_image(const char * path, Animation* anim, size_t stages_num, size_t frames_dur)
-{
-    anim->texture = LoadTexture(path);
-    anim->stages_num = stages_num;
-    anim->frame_rect.x = 0;
-    anim->frame_rect.y = 0;
-    anim->frame_rect.width = anim->texture.width/stages_num;
-    anim->frame_rect.height = anim->texture.height;
-    anim->frames_dur = frames_dur;
-    anim->current_frame_cnt = 0;
-    anim->start_frame_cnt = 0;
-    return true;
-}
+// bool init_animation_from_image(const char * path, Animation* anim, size_t stages_num, size_t frames_dur)
+// {
+//     anim->texture = LoadTexture(path);
+//     anim->stages_num = stages_num;
+//     anim->frame_rect.x = 0;
+//     anim->frame_rect.y = 0;
+//     anim->frame_rect.width = anim->texture.width/stages_num;
+//     anim->frame_rect.height = anim->texture.height;
+//     anim->frames_dur = frames_dur;
+//     anim->current_frame_cnt = 0;
+//     anim->start_frame_cnt = 0;
+//     return true;
+// }
 
-bool init_animation_from_image_roi(const char * path, Animation* anim, size_t stages_num, size_t frames_dur, Rectangle roi)
-{
-    anim->texture = LoadTexture(path);
-    anim->stages_num = stages_num;
-    anim->frame_rect.x = roi.x;
-    anim->frame_rect.y = roi.y;
-    anim->frame_rect.width = roi.width/stages_num;
-    anim->frame_rect.height = anim->texture.height;
-    anim->frames_dur = frames_dur;
-    anim->current_frame_cnt = 0;
-    anim->start_frame_cnt = 0;
-    return true;
-}
+// bool init_animation_from_image_roi(const char * path, Animation* anim, size_t stages_num, size_t frames_dur, Rectangle roi)
+// {
+//     anim->texture = LoadTexture(path);
+//     anim->stages_num = stages_num;
+//     anim->frame_rect.x = roi.x;
+//     anim->frame_rect.y = roi.y;
+//     anim->frame_rect.width = roi.width/stages_num;
+//     anim->frame_rect.height = anim->texture.height;
+//     anim->frames_dur = frames_dur;
+//     anim->current_frame_cnt = 0;
+//     anim->start_frame_cnt = 0;
+//     return true;
+// }
 
 void enter_input_mode(Player* player)
 {
     PlayerState* current_state = &player->state[player->state_index];
-    memcpy(&player->state[player->state_index], &INPUT_MODE_STATE, sizeof(PlayerState));
+    if (current_state->kind != INPUT_MODE)
+    {
+        memcpy(&player->state[player->state_index], &INPUT_MODE_STATE, sizeof(PlayerState));
+    }
 }
 
 void process_game_state(Player* player)
@@ -159,7 +176,6 @@ void process_game_state(Player* player)
     { 
         memcpy(&player->state[player->state_index], &HIT_MODE_STATE, sizeof(PlayerState));
     }
-
     if ((current_state->kind == WALK_LEFT) || (current_state->kind == WALK_RIGHT))
     {
 
@@ -212,19 +228,20 @@ int main(void)
     ImageCrop(&hit_image, (Rectangle){.x = attack_image.width/4, .y = 0, .width = 3*attack_image.width/4, .height = attack_image.height});
     Texture2D input_texture = LoadTextureFromImage(input_image);
     Texture2D hit_texture = LoadTextureFromImage(hit_image);
+    Texture2D idle_texture = LoadTextureFromImage(idle_image);
     Image walk_right_image = LoadImage("assets/Knight_1/Walk.png");
     Image walk_left_image = ImageCopy(walk_right_image);
     ImageFlipHorizontal(&walk_left_image);
     Texture2D walk_left_texture = LoadTextureFromImage(walk_left_image);
-
     Texture2D walk_right_texture = LoadTextureFromImage(walk_right_image);
 
 
-    init_animation_from_image("assets/Knight_1/Idle.png", &animations[IDLE], IDLE_ANIMATION_FRAMES, IDLE_DURATION);
-    init_animation_from_texture(hit_texture, &animations[HIT], HIT_ANIMATION_FRAMES, HIT_DURATION);
-    init_animation_from_texture(input_texture, &animations[INPUT_MODE], INPUT_ANIMATION_FRAMES, INPUT_MODE_DURATION);
-    init_animation_from_texture(walk_left_texture , &animations[WALK_LEFT], WALK_ANIMATION_FRAMES, WALK_ANIMATION_DURATION_FRAMES );
-    init_animation_from_texture(walk_right_texture , &animations[WALK_RIGHT], WALK_ANIMATION_FRAMES, WALK_ANIMATION_DURATION_FRAMES );
+    // bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stages_num, size_t start_offset_pixel, size_t offset_between_stages, size_t figure_width)
+    init_animation_from_texture(idle_texture, &animations[IDLE], 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
+    init_animation_from_texture(hit_texture, &animations[HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
+    init_animation_from_texture(input_texture, &animations[INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
+    init_animation_from_texture(walk_left_texture , &animations[WALK_LEFT], 8, 50, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
+    init_animation_from_texture(walk_right_texture , &animations[WALK_RIGHT], 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
 
 
     UnloadImage(idle_image);
