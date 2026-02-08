@@ -95,7 +95,7 @@ Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
     return frame_rect;
 }
 
-bool draw_player(Player* player, size_t current_frame_cnt, Animation* animations)
+bool draw_player(Player* player, Animation* animations)
 {
     PlayerState* current_state = &player->state[player->state_index];
     if (current_state->duration == current_state->cnt)
@@ -197,13 +197,15 @@ void process_game_state(Player* player)
         }
         case WALK_RIGHT:
         {
-
             player->position.x += WALK_INCREMENT_PIXEL_PER_FRAME;
             break;        
         }
+        default:
+        {
+            break;
+        }
     }
 }   
-
 
 
 int main(void)
@@ -250,11 +252,10 @@ int main(void)
     UnloadImage(hit_image);
     UnloadImage(walk_right_image);
     UnloadImage(walk_left_image);
-    int currentFrame = 0;
 
     int framesCounter = 0;
 
-    SetTargetFPS(120);               // Set our game to run at 60 frames-per-second
+    SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
     while (!WindowShouldClose())    // Detect window close button or ESC key
@@ -277,7 +278,7 @@ int main(void)
         if(IsKeyReleased(KEY_H)) walk_stop(&player);
 
         process_game_state(&player);
-        draw_player(&player, framesCounter, animations);
+        draw_player(&player, animations);
         // DrawTextureRec(scarfy, frameRec, position, WHITE);  // Draw part of the texture
 
 
