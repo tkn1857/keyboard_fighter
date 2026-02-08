@@ -7,7 +7,6 @@
 #define KNIGHT_FIGURE_WIDTH_PX  64
 #define KNIGHT_FIGURE_OFFSET    64
 
-
 #define HIT_FRAMES_NUM      4
 #define IDLE_DURATION       20
 #define INPUT_MODE_DURATION 15
@@ -22,15 +21,6 @@
 #define WALK_ANIMATION_DURATION_FRAMES 50 
 #define WALK_INCREMENT_PIXEL_PER_FRAME 2 
 
-typedef struct
-{
-    Texture2D texture;
-    size_t stages_num;
-    size_t start_offset_pixel;
-    size_t offset_between_stages;
-    size_t figure_width;
-} Animation;
-
 typedef enum 
 {
     IDLE = 0,
@@ -39,6 +29,17 @@ typedef enum
     WALK,
     PLAYER_STATE_KIND_CAPACITY
 } PlayerStateKind;
+
+#define LEFT_HEADING_ANIMATION_OFFSET PLAYER_STATE_KIND_CAPACITY
+typedef struct
+{
+    Texture2D texture;
+    size_t stages_num;
+    size_t start_offset_pixel;
+    size_t offset_between_stages;
+    size_t figure_width;
+    size_t player_position_offset;
+} Animation;
 
 typedef struct 
 {
@@ -112,24 +113,25 @@ bool draw_player(Player* player, Animation* animations)
     size_t animation_frame = ((float)current_state->cnt/(float)current_state->duration) * animation->stages_num;
     Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
     // printf("%ld,%ld,%ld, %f %f \n", current_state->cnt, current_state->duration,  animation_frame,  frame_rect.x, frame_rect.y);
-    Vector2 texture_position = {.x = player->position.x - 30,  .y = player->position.y - animation->texture.height};
+    Vector2 texture_position = {.x = player->position.x - animation->player_position_offset ,  .y = player->position.y - animation->texture.height};
     DrawTextureRec(animation->texture, frame_rect, texture_position, WHITE);
     DrawCircle(player->position.x , player->position.y, 5, GREEN);
     frame_rect.x = texture_position.x;
     frame_rect.y = texture_position.y;
-    DrawRectangleLinesEx(frame_rect, 2, RED);
+    // DrawRectangleLinesEx(frame_rect, 2, RED);
     current_state->cnt++;
     return true;
 }
 
 
-bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stages_num, size_t start_offset_pixel, size_t offset_between_stages, size_t figure_width)
+bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stages_num, size_t start_offset_pixel, size_t offset_between_stages, size_t figure_width, size_t player_position_offset)
 {
     anim->texture = texture;
     anim->stages_num = stages_num;
     anim->start_offset_pixel = start_offset_pixel;
     anim->offset_between_stages = offset_between_stages;
     anim->figure_width = figure_width;
+    anim->player_position_offset = player_position_offset;
     return true;
 }
 
@@ -255,18 +257,19 @@ int main(void)
     Texture2D walk_left_texture = LoadTextureFromImage(walk_left_image);
     Texture2D walk_right_texture = LoadTextureFromImage(walk_right_image);
 
-
+    size_t player_offset = 32; 
     // bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stages_num, size_t start_offset_pixel, size_t offset_between_stages, size_t figure_width)
-    init_animation_from_texture(idle_texture, &animations[IDLE], 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
-    init_animation_from_texture(hit_texture, &animations[HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
-    init_animation_from_texture(input_texture, &animations[INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
-    init_animation_from_texture(walk_right_texture , &animations[WALK], 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
+    init_animation_from_texture(idle_texture, &animations[IDLE], 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(hit_texture, &animations[HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(input_texture, &animations[INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(walk_right_texture , &animations[WALK], 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
 
 
-    init_animation_from_texture(idle_texture_left, &animations[PLAYER_STATE_KIND_CAPACITY + IDLE], 4, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
-    init_animation_from_texture(hit_texture_left, &animations[PLAYER_STATE_KIND_CAPACITY + HIT], 3, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
-    init_animation_from_texture(input_texture_left, &animations[PLAYER_STATE_KIND_CAPACITY + INPUT_MODE], 1, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
-    init_animation_from_texture(walk_left_texture , &animations[PLAYER_STATE_KIND_CAPACITY + WALK], 8, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX);
+    size_t player_offset_left = 96; 
+    init_animation_from_texture(idle_texture_left, &animations[LEFT_HEADING_ANIMATION_OFFSET + IDLE], 4, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(hit_texture_left, &animations[LEFT_HEADING_ANIMATION_OFFSET + HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset_left);
+    init_animation_from_texture(input_texture_left, &animations[LEFT_HEADING_ANIMATION_OFFSET + INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset_left);
+    init_animation_from_texture(walk_left_texture , &animations[LEFT_HEADING_ANIMATION_OFFSET + WALK], 8, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
     // PLAYER_STATE_KIND_CAPACITY
 
     UnloadImage(idle_image);
