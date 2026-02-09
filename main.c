@@ -10,7 +10,7 @@
 
 #define HIT_TEXT_POSITION_Y                         SCREEN_HEIGHT*0.2
 #define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
-#define HIT_TEXT_CAPACITY                           3000
+#define HIT_TEXT_CAPACITY                           500
 
 #define STAGE_COORDINATE                            SCREEN_HEIGHT*0.8 
 
@@ -24,7 +24,7 @@
 #define KNIGHT_FIGURE_WIDTH_PX                      64
 #define KNIGHT_FIGURE_OFFSET                        64
 
-#define HIT_DURATION_MS                             800.0f
+#define HIT_DURATION_MS                             500.0f
 #define HIT_DURATION_FRAMES                         ((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
 #define HIT_ANIMATION_FRAMES                        3
 
@@ -32,7 +32,7 @@
 #define IDLE_DURATION_FRAMES                        ((int)IDLE_DURATION_MS / (int)MS_PER_FRAME)
 #define IDLE_ANIMATION_FRAMES                       4
 
-#define INPUT_MODE_DURATION_MS                      300 
+#define INPUT_MODE_DURATION_MS                      500 
 #define INPUT_MODE_DURATION_FRAMES                  ((int)INPUT_MODE_DURATION_MS / (int)MS_PER_FRAME)
 #define INPUT_ANIMATION_FRAMES                      1
 
@@ -128,9 +128,20 @@ Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
 
 void draw_hit_text(Player* player)
 {
+    #define RENDER_TEXT_SIZE 5
+    size_t font_size = 16*1.5;
+    static char render_text[RENDER_TEXT_SIZE + 1];  
+    size_t start = player->hit_text_idx;
+    for (size_t i = 0; i < RENDER_TEXT_SIZE; i++)
+    {
+        render_text[i] = player->hit_text[(start + i)%HIT_TEXT_CAPACITY];
+    }     
+    render_text[RENDER_TEXT_SIZE] = '\0';
+    int text_len_px = MeasureText(render_text, font_size);
+    // DrawLine(0, HIT_TEXT_POSITION_Y, SCREEN_WIDTH, HIT_TEXT_POSITION_Y, BLACK);
+    // DrawText(&player->hit_text[player->hit_text_idx % HIT_TEXT_CAPACITY], 0, HIT_TEXT_POSITION_Y, SCREEN_WIDTH/10, BLACK);
+    DrawText(render_text, player->position.x - text_len_px/2, player->position.y - 96, font_size, BLACK);
 
-    DrawLine(0, HIT_TEXT_POSITION_Y, SCREEN_WIDTH, HIT_TEXT_POSITION_Y, BLACK);
-    DrawText(&player->hit_text[player->hit_text_idx % HIT_TEXT_CAPACITY], 0, HIT_TEXT_POSITION_Y, SCREEN_WIDTH/10, BLACK);
     // DrawLine(0, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, SCREEN_WIDTH, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, BLACK);
 }
 
@@ -213,7 +224,7 @@ void process_game_state(Game* game)
             }
             if (game->p1_last_captured_key == player->hit_text[player->hit_text_idx])
             {
-                player->hit_text_idx++;
+                player->hit_text_idx = (player->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
                 player->current_hit_str++;
             }
             break;
@@ -244,6 +255,7 @@ void process_game_state(Game* game)
         }
     }
 }   
+
 Game init_game()
 {
     Game game = {0};
@@ -335,21 +347,27 @@ int main(void)
         BeginDrawing();
 
         ClearBackground(RAYWHITE);
-        if (IsKeyPressed(KEY_I))
+        PlayerState current_state = game.p1.state[game.p1.state_index];
+        if (current_state.kind != INPUT_MODE)
         {
-            enter_input_mode(&game.p1);
+            if (IsKeyPressed(KEY_I))
+            {
+                enter_input_mode(&game.p1);
+            }
+            if (IsKeyDown(KEY_L)) 
+            {
+                game.p1.heading_right = true;
+                walk_start(&game.p1, WALK);
+            }
+            if (IsKeyDown(KEY_H)) 
+            {
+                game.p1.heading_right = false;
+                walk_start(&game.p1, WALK);
+            }
         }
-        if (IsKeyDown(KEY_L)) 
-        {
-            game.p1.heading_right = true;
-            walk_start(&game.p1, WALK);
-        }
-        if (IsKeyDown(KEY_H)) {
-           game.p1.heading_right = false;
-           walk_start(&game.p1, WALK);
-        }
+        
         int ch = GetCharPressed(); // Get pressed char for text input, using OS mapping
-        if (ch > 0) TraceLog(LOG_INFO,  "KEYBOARD TESTBED: CHAR PRESSED:   %c (%d)", ch, ch);
+        if (ch > 0) TraceLog(LOG_INFO,  "CHAR PRESSED:   %c (%d)", ch, ch);
         if(IsKeyReleased(KEY_L)) walk_stop(&game.p1);
         if(IsKeyReleased(KEY_H)) walk_stop(&game.p1);
         game.p1_last_captured_key = ch; 
