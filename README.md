@@ -12,7 +12,7 @@ $ ./nob -run
 - [x] Prepare hit animation
 - [x] Hit animation
 - [x] Add walk inputs and animation 
-- [ ] Add orientation for all actions
+- [x] Add orientation for all actions
 - [ ] Add input text capturing 
 - [ ] Second player
 - [ ] Defend mode

@@ -1,25 +1,45 @@
 #include <stddef.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include "raylib.h"
 
-#define KNIGHT_FIGURE_WIDTH_PX  64
-#define KNIGHT_FIGURE_OFFSET    64
+#define SCREEN_WIDTH                                800 * 1
+#define SCREEN_HEIGHT                               450 * 1
 
-#define HIT_FRAMES_NUM      4
-#define IDLE_DURATION       20
-#define INPUT_MODE_DURATION 15
-#define HIT_DURATION        20
-#define PLAYER_STATE_CAPACITY 12
-#define IDLE_ANIMATION_FRAMES 4
-#define HIT_ANIMATION_FRAMES  3
-#define INPUT_ANIMATION_FRAMES 1
+#define HIT_TEXT_POSITION_Y                         SCREEN_HEIGHT*0.2
+#define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
+#define HIT_TEXT_CAPACITY                           3000
 
+#define STAGE_COORDINATE                            SCREEN_HEIGHT*0.8 
 
-#define WALK_ANIMATION_FRAMES 8
-#define WALK_ANIMATION_DURATION_FRAMES 50 
-#define WALK_INCREMENT_PIXEL_PER_FRAME 2 
+#define GOOD_CPM                                    300
+
+#define FRAMERATE                                   60 
+#define MS_PER_FRAME                                (1000/FRAMERATE)
+
+#define PLAYER_STATE_CAPACITY                       12
+
+#define KNIGHT_FIGURE_WIDTH_PX                      64
+#define KNIGHT_FIGURE_OFFSET                        64
+
+#define HIT_DURATION_MS                             800.0f
+#define HIT_DURATION_FRAMES                         ((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
+#define HIT_ANIMATION_FRAMES                        3
+
+#define IDLE_DURATION_MS                            1000                               
+#define IDLE_DURATION_FRAMES                        ((int)IDLE_DURATION_MS / (int)MS_PER_FRAME)
+#define IDLE_ANIMATION_FRAMES                       4
+
+#define INPUT_MODE_DURATION_MS                      300 
+#define INPUT_MODE_DURATION_FRAMES                  ((int)INPUT_MODE_DURATION_MS / (int)MS_PER_FRAME)
+#define INPUT_ANIMATION_FRAMES                      1
+
+#define WALK_ANIMATION_FRAMES                       8
+#define WALK_ANIMATION_DURATION_MS                  500 
+#define WALK_ANIMATION_DURATION_FRAMES              ((int)WALK_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
+#define WALK_INCREMENT_PIXEL_PER_FRAME              2 
 
 typedef enum 
 {
@@ -53,12 +73,23 @@ typedef struct
     Vector2 position;
     PlayerState state[PLAYER_STATE_CAPACITY];
     size_t state_index;
-    bool heading_forward;
+    bool heading_right;
+    char hit_text[HIT_TEXT_CAPACITY];
+    size_t hit_text_idx;
+    size_t current_hit_str;
 } Player;
 
-PlayerState IDLE_STATE = {.kind = IDLE, .duration = IDLE_DURATION, .cnt = 0};
-PlayerState INPUT_MODE_STATE = {.kind = INPUT_MODE, .duration = INPUT_MODE_DURATION, .cnt = 0};
-PlayerState HIT_MODE_STATE = {.kind = HIT, .duration = HIT_DURATION, .cnt = 0};
+typedef struct 
+{
+    Player p1;
+    Player p2;
+    int p1_last_captured_key;
+    Animation animations[PLAYER_STATE_KIND_CAPACITY * 2];
+} Game;
+
+PlayerState IDLE_STATE = {.kind = IDLE, .duration = IDLE_DURATION_FRAMES, .cnt = 0};
+PlayerState INPUT_MODE_STATE = {.kind = INPUT_MODE, .duration = INPUT_MODE_DURATION_FRAMES, .cnt = 0};
+PlayerState HIT_MODE_STATE = {.kind = HIT, .duration = HIT_DURATION_FRAMES, .cnt = 0};
 PlayerState WALK_MODE_STATE = {.kind = WALK, .duration = WALK_ANIMATION_DURATION_FRAMES, .cnt = 0};
 
 
@@ -95,6 +126,20 @@ Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
     return frame_rect;
 }
 
+void draw_hit_text(Player* player)
+{
+
+    DrawLine(0, HIT_TEXT_POSITION_Y, SCREEN_WIDTH, HIT_TEXT_POSITION_Y, BLACK);
+    DrawText(&player->hit_text[player->hit_text_idx % HIT_TEXT_CAPACITY], 0, HIT_TEXT_POSITION_Y, SCREEN_WIDTH/10, BLACK);
+    // DrawLine(0, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, SCREEN_WIDTH, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, BLACK);
+}
+
+
+void draw_stage()
+{
+    DrawLine(0, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
+    //DrawLine(int startPosX, int startPosY, int endPosX, int endPosY, Color color);                // Draw a line 
+}
 bool draw_player(Player* player, Animation* animations)
 {
     PlayerState* current_state = &player->state[player->state_index];
@@ -108,7 +153,7 @@ bool draw_player(Player* player, Animation* animations)
         }
     } 
     size_t animation_offset = 0;
-    if (!player->heading_forward) animation_offset = PLAYER_STATE_KIND_CAPACITY;
+    if (!player->heading_right) animation_offset = PLAYER_STATE_KIND_CAPACITY;
     Animation * animation = &animations[animation_offset + current_state->kind];
     size_t animation_frame = ((float)current_state->cnt/(float)current_state->duration) * animation->stages_num;
     Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
@@ -135,33 +180,14 @@ bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stag
     return true;
 }
 
-// bool init_animation_from_image(const char * path, Animation* anim, size_t stages_num, size_t frames_dur)
-// {
-//     anim->texture = LoadTexture(path);
-//     anim->stages_num = stages_num;
-//     anim->frame_rect.x = 0;
-//     anim->frame_rect.y = 0;
-//     anim->frame_rect.width = anim->texture.width/stages_num;
-//     anim->frame_rect.height = anim->texture.height;
-//     anim->frames_dur = frames_dur;
-//     anim->current_frame_cnt = 0;
-//     anim->start_frame_cnt = 0;
-//     return true;
-// }
-
-// bool init_animation_from_image_roi(const char * path, Animation* anim, size_t stages_num, size_t frames_dur, Rectangle roi)
-// {
-//     anim->texture = LoadTexture(path);
-//     anim->stages_num = stages_num;
-//     anim->frame_rect.x = roi.x;
-//     anim->frame_rect.y = roi.y;
-//     anim->frame_rect.width = roi.width/stages_num;
-//     anim->frame_rect.height = anim->texture.height;
-//     anim->frames_dur = frames_dur;
-//     anim->current_frame_cnt = 0;
-//     anim->start_frame_cnt = 0;
-//     return true;
-// }
+void generate_random_text(Player* player)
+{
+    for(size_t i = 0; i < HIT_TEXT_CAPACITY; i++) 
+    {
+        // player->hit_text[i] = rand() % 95 + 32;
+        player->hit_text[i] = rand() % 25 + 97;
+    }
+}
 
 void enter_input_mode(Player* player)
 {
@@ -172,30 +198,37 @@ void enter_input_mode(Player* player)
     }
 }
 
-void process_game_state(Player* player)
+void process_game_state(Game* game)
 {
+    Player* player = &game->p1;
     PlayerState* current_state = &player->state[player->state_index];
-    if ((current_state->kind == INPUT_MODE) && (current_state->duration == current_state->cnt))
-    { 
-        memcpy(&player->state[player->state_index], &HIT_MODE_STATE, sizeof(PlayerState));
-    }
-    if (current_state->kind == WALK)
-    {
-
-    }
+    // TraceLog(LOG_INFO,  "Hit strength:   %d", player->current_hit_str);
     switch(current_state->kind)
     {
         case INPUT_MODE:
         {
-            if (current_state->duration == current_state->cnt)
+            if ((current_state->duration == current_state->cnt) && (player->current_hit_str != 0))
             {
                 memcpy(&player->state[player->state_index], &HIT_MODE_STATE, sizeof(PlayerState));
+            }
+            if (game->p1_last_captured_key == player->hit_text[player->hit_text_idx])
+            {
+                player->hit_text_idx++;
+                player->current_hit_str++;
+            }
+            break;
+        }
+        case HIT:
+        {
+            if (current_state->duration == current_state->cnt)
+            {
+                player->current_hit_str = 0;
             }
             break;
         }
         case WALK:
         {
-            if (player->heading_forward)
+            if (player->heading_right)
             {
                 player->position.x += WALK_INCREMENT_PIXEL_PER_FRAME;
             }
@@ -211,23 +244,19 @@ void process_game_state(Player* player)
         }
     }
 }   
-
-
-int main(void)
+Game init_game()
 {
-
-    Vector2 player_position = { 350.0f, 400.0f };
-    Player player = {.position = player_position, .state_index = 0};    
-    player.heading_forward = true;
+    Game game = {0};
+    Vector2 player_position = { SCREEN_WIDTH/2, STAGE_COORDINATE };
+    game.p1.position = player_position,
+    game.p1.state_index = 0;    
+    game.p1.heading_right = true;
     for(size_t i = 0; i < PLAYER_STATE_CAPACITY; i++)
     {
-        memcpy(&player.state[i], &IDLE_STATE, sizeof(PlayerState));
+        memcpy(&game.p1.state[i], &IDLE_STATE, sizeof(PlayerState));
     }
-    const int screenWidth = 800;
-    const int screenHeight = 450;
+    generate_random_text(&game.p1);
 
-    InitWindow(screenWidth, screenHeight, "raylib [textures] example - sprite animation");
-    Animation animations[PLAYER_STATE_KIND_CAPACITY * 2];
     Image idle_image = LoadImage("assets/Knight_1/Idle.png");
     Image idle_image_left = ImageCopy(idle_image);
     ImageFlipHorizontal(&idle_image_left);
@@ -258,30 +287,45 @@ int main(void)
     Texture2D walk_right_texture = LoadTextureFromImage(walk_right_image);
 
     size_t player_offset = 32; 
-    // bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stages_num, size_t start_offset_pixel, size_t offset_between_stages, size_t figure_width)
-    init_animation_from_texture(idle_texture, &animations[IDLE], 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    init_animation_from_texture(hit_texture, &animations[HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    init_animation_from_texture(input_texture, &animations[INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    init_animation_from_texture(walk_right_texture , &animations[WALK], 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(idle_texture, &game.animations[IDLE], 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(hit_texture, &game.animations[HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(input_texture, &game.animations[INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(walk_right_texture , &game.animations[WALK], 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
 
 
     size_t player_offset_left = 96; 
-    init_animation_from_texture(idle_texture_left, &animations[LEFT_HEADING_ANIMATION_OFFSET + IDLE], 4, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    init_animation_from_texture(hit_texture_left, &animations[LEFT_HEADING_ANIMATION_OFFSET + HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset_left);
-    init_animation_from_texture(input_texture_left, &animations[LEFT_HEADING_ANIMATION_OFFSET + INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset_left);
-    init_animation_from_texture(walk_left_texture , &animations[LEFT_HEADING_ANIMATION_OFFSET + WALK], 8, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(idle_texture_left, &game.animations[LEFT_HEADING_ANIMATION_OFFSET + IDLE], 4, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animation_from_texture(hit_texture_left, &game.animations[LEFT_HEADING_ANIMATION_OFFSET + HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset_left);
+    init_animation_from_texture(input_texture_left, &game.animations[LEFT_HEADING_ANIMATION_OFFSET + INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset_left);
+    init_animation_from_texture(walk_left_texture , &game.animations[LEFT_HEADING_ANIMATION_OFFSET + WALK], 8, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
     // PLAYER_STATE_KIND_CAPACITY
-
+   ; 
     UnloadImage(idle_image);
     UnloadImage(attack_image);
     UnloadImage(input_image);
     UnloadImage(hit_image);
     UnloadImage(walk_right_image);
     UnloadImage(walk_left_image);
+    return game;
+}
+void draw_game(Game* game)
+{
+    Player* player = &game->p1;
 
+    draw_hit_text(player);
+    draw_stage();
+    draw_player(player, game->animations);
+}
+int main(void)
+{
+    srand(time(0));
     int framesCounter = 0;
 
-    SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
+    const int screenWidth = SCREEN_WIDTH;
+    const int screenHeight = SCREEN_HEIGHT;
+    InitWindow(screenWidth, screenHeight, "Keyboard Fighter");
+    Game game = init_game();
+    SetTargetFPS(FRAMERATE);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
 
     while (!WindowShouldClose())    // Detect window close button or ESC key
@@ -293,38 +337,33 @@ int main(void)
         ClearBackground(RAYWHITE);
         if (IsKeyPressed(KEY_I))
         {
-            enter_input_mode(&player);
+            enter_input_mode(&game.p1);
         }
         if (IsKeyDown(KEY_L)) 
         {
-            player.heading_forward = true;
-            walk_start(&player, WALK);
+            game.p1.heading_right = true;
+            walk_start(&game.p1, WALK);
         }
         if (IsKeyDown(KEY_H)) {
-            player.heading_forward = false;
-            walk_start(&player, WALK);
+           game.p1.heading_right = false;
+           walk_start(&game.p1, WALK);
         }
-
-        if(IsKeyReleased(KEY_L)) walk_stop(&player);
-        if(IsKeyReleased(KEY_H)) walk_stop(&player);
-
-        process_game_state(&player);
-        draw_player(&player, animations);
-        // DrawTextureRec(scarfy, frameRec, position, WHITE);  // Draw part of the texture
-
+        int ch = GetCharPressed(); // Get pressed char for text input, using OS mapping
+        if (ch > 0) TraceLog(LOG_INFO,  "KEYBOARD TESTBED: CHAR PRESSED:   %c (%d)", ch, ch);
+        if(IsKeyReleased(KEY_L)) walk_stop(&game.p1);
+        if(IsKeyReleased(KEY_H)) walk_stop(&game.p1);
+        game.p1_last_captured_key = ch; 
+        process_game_state(&game.p1);
+        draw_game(&game);
 
         EndDrawing();
-        //----------------------------------------------------------------------------------
     }
 
-    // De-Initialization
-    //--------------------------------------------------------------------------------------
-    UnloadTexture(animations[IDLE].texture);
-    UnloadTexture(animations[HIT].texture);
-    UnloadTexture(animations[INPUT_MODE].texture);
+    // UnloadTexture(animations[IDLE].texture);
+    // UnloadTexture(animations[HIT].texture);
+    // UnloadTexture(animations[INPUT_MODE].texture);
 
     CloseWindow();                // Close window and OpenGL context
-    //--------------------------------------------------------------------------------------
 
     return 0;
 }
