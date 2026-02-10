@@ -1,9 +1,12 @@
 #include <stddef.h>
+#include <assert.h>
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include "raylib.h"
+
+#define MAX_THINGS                                  1024
 
 #define SCREEN_WIDTH                                800 * 1
 #define SCREEN_HEIGHT                               450 * 1
@@ -24,7 +27,7 @@
 #define KNIGHT_FIGURE_WIDTH_PX                      64
 #define KNIGHT_FIGURE_OFFSET                        64
 
-#define HIT_DURATION_MS                             500.0f
+#define HIT_DURATION_MS                             300.0f
 #define HIT_DURATION_FRAMES                         ((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
 #define HIT_ANIMATION_FRAMES                        3
 
@@ -32,7 +35,7 @@
 #define IDLE_DURATION_FRAMES                        ((int)IDLE_DURATION_MS / (int)MS_PER_FRAME)
 #define IDLE_ANIMATION_FRAMES                       4
 
-#define INPUT_MODE_DURATION_MS                      500 
+#define INPUT_MODE_DURATION_MS                      300 
 #define INPUT_MODE_DURATION_FRAMES                  ((int)INPUT_MODE_DURATION_MS / (int)MS_PER_FRAME)
 #define INPUT_ANIMATION_FRAMES                      1
 
@@ -41,16 +44,58 @@
 #define WALK_ANIMATION_DURATION_FRAMES              ((int)WALK_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
 #define WALK_INCREMENT_PIXEL_PER_FRAME              2 
 
+#define LEFT_HEADING_ANIMATION_OFFSET STATE_NUM
+#define KEY_PRESSED_BUF_CAP                         12
+typedef int thing_idx;
+
+typedef enum
+{
+    POSITIONABLE = (1<<0),
+    CONTROLLABLE = (1<<1),
+    CAN_WALK = (1<<2),
+    HAS_DIRECTION = (1<<3),
+    CAN_HIT = (1<<4),
+    NPC = (1<<5),
+    ENEMY = (1<<6),
+} Traits;
+
 typedef enum 
 {
     IDLE = 0,
     INPUT_MODE,
     HIT,
+    RECOVERY,
     WALK,
-    PLAYER_STATE_KIND_CAPACITY
-} PlayerStateKind;
+    DEFEND,
+    RUN,
+    TAKING_DAMAGE,
+    DYING,
+    STATE_NUM
+} State;
 
-#define LEFT_HEADING_ANIMATION_OFFSET PLAYER_STATE_KIND_CAPACITY
+typedef enum{
+    KNIGHT = 0,
+    DEMON,
+    THING_KIND_NUM
+} ThingKind;
+
+typedef struct{
+    Traits traits;
+    ThingKind kind;
+    thing_idx animations_start_idx;
+    State state;
+    size_t state_cnt;
+    int damage;
+    int health;
+    Vector2 position;
+    Vector2 orientation;
+    size_t state_dur[STATE_NUM];
+    float walk_speed; // in percent from total stage per 1 ms
+    thing_idx hit_text_idx;
+    Rectangle hitbox;
+    float reach; // in percent from total stage len
+} Thing;
+
 typedef struct
 {
     Texture2D texture;
@@ -63,7 +108,7 @@ typedef struct
 
 typedef struct 
 {
-    PlayerStateKind kind;
+    State kind;
     size_t duration;
     size_t cnt;
 } PlayerState;
@@ -81,10 +126,11 @@ typedef struct
 
 typedef struct 
 {
-    Player p1;
-    Player p2;
-    int p1_last_captured_key;
-    Animation animations[PLAYER_STATE_KIND_CAPACITY * 2];
+    Thing things[MAX_THINGS];
+    Animation animations[STATE_NUM * THING_KIND_NUM * 2];
+    char hit_text[HIT_TEXT_CAPACITY];
+    char key_pressed;
+    thing_idx player_idx;
 } Game;
 
 PlayerState IDLE_STATE = {.kind = IDLE, .duration = IDLE_DURATION_FRAMES, .cnt = 0};
@@ -92,8 +138,7 @@ PlayerState INPUT_MODE_STATE = {.kind = INPUT_MODE, .duration = INPUT_MODE_DURAT
 PlayerState HIT_MODE_STATE = {.kind = HIT, .duration = HIT_DURATION_FRAMES, .cnt = 0};
 PlayerState WALK_MODE_STATE = {.kind = WALK, .duration = WALK_ANIMATION_DURATION_FRAMES, .cnt = 0};
 
-
-void walk_start(Player* player, PlayerStateKind kind)
+void walk_start(Player* player, State kind)
 {
 
     PlayerState* current_state = &player->state[player->state_index];
@@ -103,7 +148,6 @@ void walk_start(Player* player, PlayerStateKind kind)
         current_state->kind = kind;
     }
 }
-
 
 void walk_stop(Player* player)
 {
@@ -115,7 +159,6 @@ void walk_stop(Player* player)
     }
 }
 
-
 Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
 {
     Rectangle frame_rect = {0};
@@ -126,15 +169,16 @@ Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
     return frame_rect;
 }
 
-void draw_hit_text(Player* player)
+void draw_hit_text(Game* game)
 {
     #define RENDER_TEXT_SIZE 5
     size_t font_size = 16*1.5;
     static char render_text[RENDER_TEXT_SIZE + 1];  
+    Thing * player = &game->things[game->player_idx];
     size_t start = player->hit_text_idx;
     for (size_t i = 0; i < RENDER_TEXT_SIZE; i++)
     {
-        render_text[i] = player->hit_text[(start + i)%HIT_TEXT_CAPACITY];
+        render_text[i] = game->hit_text[(start + i)%HIT_TEXT_CAPACITY];
     }     
     render_text[RENDER_TEXT_SIZE] = '\0';
     int text_len_px = MeasureText(render_text, font_size);
@@ -151,31 +195,39 @@ void draw_stage()
     DrawLine(0, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
     //DrawLine(int startPosX, int startPosY, int endPosX, int endPosY, Color color);                // Draw a line 
 }
-bool draw_player(Player* player, Animation* animations)
+
+thing_idx get_animation(Game* game, thing_idx idx)
 {
-    PlayerState* current_state = &player->state[player->state_index];
-    if (current_state->duration == current_state->cnt)
-    {
-        if (current_state->kind != WALK)
-        {
-            memcpy(&player->state[player->state_index], &IDLE_STATE, sizeof(PlayerState));
-            player->state_index = (player->state_index + 1) % PLAYER_STATE_CAPACITY;
-            current_state = &player->state[player->state_index];
-        }
-    } 
-    size_t animation_offset = 0;
-    if (!player->heading_right) animation_offset = PLAYER_STATE_KIND_CAPACITY;
-    Animation * animation = &animations[animation_offset + current_state->kind];
-    size_t animation_frame = ((float)current_state->cnt/(float)current_state->duration) * animation->stages_num;
+    Thing * player = &game->things[idx];
+    thing_idx animation_idx = player->state + player->kind * STATE_NUM;
+    TraceLog(LOG_DEBUG,  "Animation idx:   %d", animation_idx);
+    return animation_idx;
+    //Animation * animation = game.animations[animation_idx];
+}
+
+bool draw_player(Game * game)
+{
+    Thing * player = &game->things[game->player_idx];
+    // PlayerState* current_state = player->state[player->state_index];
+    // size_t animation_offset = 0;
+    // if (!player->heading_right) animation_offset = STATE_NUM;
+
+    thing_idx animation_idx = get_animation(game, game->player_idx);
+    Animation* animation = &game->animations[animation_idx];
+    int state_duration = player->state_dur[player->state];
+    assert(state_duration != 0);
+    size_t animation_frame = ((float)player->state_cnt/(float)state_duration) * animation->stages_num;
     Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
-    // printf("%ld,%ld,%ld, %f %f \n", current_state->cnt, current_state->duration,  animation_frame,  frame_rect.x, frame_rect.y);
+
+    //printf("%ld,%ld, %f %f \n", player->state_cnt, animation_frame,  frame_rect.x, frame_rect.y);
+
     Vector2 texture_position = {.x = player->position.x - animation->player_position_offset ,  .y = player->position.y - animation->texture.height};
     DrawTextureRec(animation->texture, frame_rect, texture_position, WHITE);
     DrawCircle(player->position.x , player->position.y, 5, GREEN);
     frame_rect.x = texture_position.x;
     frame_rect.y = texture_position.y;
     // DrawRectangleLinesEx(frame_rect, 2, RED);
-    current_state->cnt++;
+    // current_state->cnt++;
     return true;
 }
 
@@ -191,12 +243,36 @@ bool init_animation_from_texture(Texture2D texture, Animation* anim, size_t stag
     return true;
 }
 
-void generate_random_text(Player* player)
+void init_animations_from_image_with_reverse(Image img, Animation* animations, size_t animation_idx, size_t stages_num, size_t start_offset_pixel, size_t offset_between_stages, size_t figure_width, size_t player_position_offset)
+{
+    Animation* anim = &animations[animation_idx];
+    anim->texture = LoadTextureFromImage(img);
+    anim->stages_num = stages_num;
+    anim->start_offset_pixel = start_offset_pixel;
+    anim->offset_between_stages = offset_between_stages;
+    anim->figure_width = figure_width;
+    anim->player_position_offset = player_position_offset;
+
+    size_t width = anim->offset_between_stages + anim->figure_width;
+
+    Image inversed_image = ImageCopy(img);
+    ImageFlipHorizontal(&inversed_image);
+
+    anim = &animations[animation_idx + STATE_NUM];
+    anim->texture = LoadTextureFromImage(inversed_image);
+    anim->stages_num = stages_num;
+    anim->start_offset_pixel = start_offset_pixel;
+    anim->offset_between_stages = offset_between_stages;
+    anim->figure_width = figure_width;
+    anim->player_position_offset = width - player_position_offset;
+    UnloadImage(inversed_image);
+}
+
+void generate_hit_text(Game* game)
 {
     for(size_t i = 0; i < HIT_TEXT_CAPACITY; i++) 
     {
-        // player->hit_text[i] = rand() % 95 + 32;
-        player->hit_text[i] = rand() % 25 + 97;
+       game->hit_text[i] = rand() % 25 + 97;
     }
 }
 
@@ -209,37 +285,44 @@ void enter_input_mode(Player* player)
     }
 }
 
+
+
 void process_game_state(Game* game)
 {
-    Player* player = &game->p1;
-    PlayerState* current_state = &player->state[player->state_index];
+    Thing* player = &game->things[game->player_idx];
+    // PlayerState* current_state = &player->state[player->state_index];
     // TraceLog(LOG_INFO,  "Hit strength:   %d", player->current_hit_str);
-    switch(current_state->kind)
+    size_t current_state_dur = player->state_dur[player->state];
+    switch(player->state)
     {
         case INPUT_MODE:
         {
-            if ((current_state->duration == current_state->cnt) && (player->current_hit_str != 0))
+            if ((current_state_dur == player->state_cnt) && (player->damage != 0))
+            // if ((current_state_dur == player->state_cnt) )
             {
-                memcpy(&player->state[player->state_index], &HIT_MODE_STATE, sizeof(PlayerState));
+                player->state = HIT;
+                player->state_cnt = 0;
+                break;
             }
-            if (game->p1_last_captured_key == player->hit_text[player->hit_text_idx])
+            if (game->key_pressed == game->hit_text[player->hit_text_idx])
             {
+                player->damage += 1;
                 player->hit_text_idx = (player->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
-                player->current_hit_str++;
             }
             break;
         }
         case HIT:
         {
-            if (current_state->duration == current_state->cnt)
+            if (current_state_dur == player->state_cnt)
             {
-                player->current_hit_str = 0;
+                player->damage = 0;
             }
             break;
         }
         case WALK:
         {
-            if (player->heading_right)
+            Vector2 default_orientation = {.x = 1, .y = 0};
+            if ((player->orientation.x == default_orientation.x ) && (player->orientation.y == default_orientation.y))
             {
                 player->position.x += WALK_INCREMENT_PIXEL_PER_FRAME;
             }
@@ -256,77 +339,97 @@ void process_game_state(Game* game)
     }
 }   
 
+void increment_game(Game* game)
+{
+    Thing* player = &game->things[game->player_idx];
+    size_t current_state_dur = player->state_dur[player->state];
+    if (current_state_dur == player->state_cnt)
+    {
+        player->state_cnt = 0;
+        player->state = IDLE;
+    }
+    player->state_cnt++;
+}
+
+void init_player(Game* game, thing_idx idx)
+{
+    Vector2 player_position = { SCREEN_WIDTH/2, STAGE_COORDINATE };
+    game->things[idx].position = player_position;
+    game->things[idx].state = IDLE;    
+    game->things[idx].orientation.x = 1;
+    game->things[idx].orientation.y = 0;
+
+    game->things[idx].state_dur[IDLE] = IDLE_DURATION_FRAMES;
+    game->things[idx].state_dur[INPUT_MODE] = INPUT_MODE_DURATION_FRAMES;
+    game->things[idx].state_dur[HIT] = HIT_DURATION_FRAMES;
+    game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
+}
+
 Game init_game()
 {
     Game game = {0};
-    Vector2 player_position = { SCREEN_WIDTH/2, STAGE_COORDINATE };
-    game.p1.position = player_position,
-    game.p1.state_index = 0;    
-    game.p1.heading_right = true;
-    for(size_t i = 0; i < PLAYER_STATE_CAPACITY; i++)
-    {
-        memcpy(&game.p1.state[i], &IDLE_STATE, sizeof(PlayerState));
-    }
-    generate_random_text(&game.p1);
-
+    generate_hit_text(&game);
+    game.player_idx = 1;
+    init_player(&game, 1);
     Image idle_image = LoadImage("assets/Knight_1/Idle.png");
-    Image idle_image_left = ImageCopy(idle_image);
-    ImageFlipHorizontal(&idle_image_left);
-
     Image attack_image = LoadImage("assets/Knight_1/Attack 3.png");
     Image input_image = ImageCopy(attack_image);
     ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = attack_image.width/4, .height = attack_image.height});
-    Image input_image_left = ImageCopy(input_image);
-    ImageFlipHorizontal(&input_image_left);
 
     Image hit_image = ImageCopy(attack_image);
     ImageCrop(&hit_image, (Rectangle){.x = attack_image.width/4, .y = 0, .width = 3*attack_image.width/4, .height = attack_image.height});
-    Image hit_image_left = ImageCopy(hit_image);
-    ImageFlipHorizontal(&hit_image_left);
-
     Image walk_right_image = LoadImage("assets/Knight_1/Walk.png");
-    Image walk_left_image = ImageCopy(walk_right_image);
-    ImageFlipHorizontal(&walk_left_image);
 
 
-    Texture2D input_texture = LoadTextureFromImage(input_image);
-    Texture2D input_texture_left = LoadTextureFromImage(input_image_left);
-    Texture2D hit_texture = LoadTextureFromImage(hit_image);
-    Texture2D hit_texture_left = LoadTextureFromImage(hit_image_left);
-    Texture2D idle_texture = LoadTextureFromImage(idle_image);
-    Texture2D idle_texture_left = LoadTextureFromImage(idle_image_left);
-    Texture2D walk_left_texture = LoadTextureFromImage(walk_left_image);
-    Texture2D walk_right_texture = LoadTextureFromImage(walk_right_image);
 
     size_t player_offset = 32; 
-    init_animation_from_texture(idle_texture, &game.animations[IDLE], 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    init_animation_from_texture(hit_texture, &game.animations[HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    init_animation_from_texture(input_texture, &game.animations[INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    init_animation_from_texture(walk_right_texture , &game.animations[WALK], 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animations_from_image_with_reverse(idle_image, game.animations, IDLE, 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animations_from_image_with_reverse(hit_image, game.animations, HIT, 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animations_from_image_with_reverse(input_image, game.animations, INPUT_MODE, 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
+    init_animations_from_image_with_reverse(walk_right_image , game.animations, WALK, 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
 
 
-    size_t player_offset_left = 96; 
-    init_animation_from_texture(idle_texture_left, &game.animations[LEFT_HEADING_ANIMATION_OFFSET + IDLE], 4, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    init_animation_from_texture(hit_texture_left, &game.animations[LEFT_HEADING_ANIMATION_OFFSET + HIT], 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset_left);
-    init_animation_from_texture(input_texture_left, &game.animations[LEFT_HEADING_ANIMATION_OFFSET + INPUT_MODE], 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset_left);
-    init_animation_from_texture(walk_left_texture , &game.animations[LEFT_HEADING_ANIMATION_OFFSET + WALK], 8, 64, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    // PLAYER_STATE_KIND_CAPACITY
-   ; 
+
     UnloadImage(idle_image);
     UnloadImage(attack_image);
     UnloadImage(input_image);
     UnloadImage(hit_image);
     UnloadImage(walk_right_image);
-    UnloadImage(walk_left_image);
     return game;
 }
+
 void draw_game(Game* game)
 {
-    Player* player = &game->p1;
-
-    draw_hit_text(player);
     draw_stage();
-    draw_player(player, game->animations);
+    draw_hit_text(game);
+    draw_player(game);
+}
+
+
+void process_input(Game* game)
+{
+    Thing* player = &game->things[game->player_idx];
+    if ( player->state != INPUT_MODE)
+    {
+        if (game->key_pressed == 'i')
+        {
+                //enter_input_mode(&game.p1);
+                printf("Entering input mode\n");
+                player->state = INPUT_MODE;
+                player->state_cnt = 0;
+        }
+            // if (IsKeyDown(KEY_L)) 
+            // {
+            //     game.p1.heading_right = true;
+            //     walk_start(&game.p1, WALK);
+            // }
+            // if (IsKeyDown(KEY_H)) 
+            // {
+            //     game.p1.heading_right = false;
+            //     walk_start(&game.p1, WALK);
+            // }
+        }
+    
 }
 int main(void)
 {
@@ -347,33 +450,28 @@ int main(void)
         BeginDrawing();
 
         ClearBackground(RAYWHITE);
-        PlayerState current_state = game.p1.state[game.p1.state_index];
-        if (current_state.kind != INPUT_MODE)
-        {
-            if (IsKeyPressed(KEY_I))
-            {
-                enter_input_mode(&game.p1);
-            }
-            if (IsKeyDown(KEY_L)) 
-            {
-                game.p1.heading_right = true;
-                walk_start(&game.p1, WALK);
-            }
-            if (IsKeyDown(KEY_H)) 
-            {
-                game.p1.heading_right = false;
-                walk_start(&game.p1, WALK);
-            }
-        }
-        
+
         int ch = GetCharPressed(); // Get pressed char for text input, using OS mapping
         if (ch > 0) TraceLog(LOG_INFO,  "CHAR PRESSED:   %c (%d)", ch, ch);
-        if(IsKeyReleased(KEY_L)) walk_stop(&game.p1);
-        if(IsKeyReleased(KEY_H)) walk_stop(&game.p1);
-        game.p1_last_captured_key = ch; 
-        process_game_state(&game.p1);
+        // print_captured_text(&game); 
+        game.key_pressed = ch;
+        process_input(&game);
+        Thing* player = &game.things[game.player_idx];
+            //     walk_start(&game.p1, WALK);
+            // }
+            // if (IsKeyDown(KEY_H)) 
+            // {
+            //     game.p1.heading_right = false;
+            //     walk_start(&game.p1, WALK);
+            // }
+        // printf("state: %d\n" , player->state);
+        // if(IsKeyReleased(KEY_L)) walk_stop(&game.p1);
+        // if(IsKeyReleased(KEY_H)) walk_stop(&game.p1);
+        // game.p1_last_captured_key = ch; 
+        TraceLog(LOG_DEBUG,  "STATE:  (%d) %d", player->state, player->state_cnt);
+        process_game_state(&game);
         draw_game(&game);
-
+        increment_game(&game);
         EndDrawing();
     }
 
