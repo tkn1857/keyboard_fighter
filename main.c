@@ -42,11 +42,14 @@
 #define WALK_ANIMATION_FRAMES                       8
 #define WALK_ANIMATION_DURATION_MS                  500 
 #define WALK_ANIMATION_DURATION_FRAMES              ((int)WALK_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
-#define WALK_INCREMENT_PIXEL_PER_FRAME              2 
+#define WALK_SPEED_PERC_PER_MS                      0.02f 
+#define WALK_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*WALK_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
 
 #define LEFT_HEADING_ANIMATION_OFFSET STATE_NUM
 #define KEY_PRESSED_BUF_CAP                         12
 typedef int thing_idx;
+
+Vector2 default_orientation = {.x = 1, .y = 0};
 
 typedef enum
 {
@@ -138,6 +141,13 @@ PlayerState INPUT_MODE_STATE = {.kind = INPUT_MODE, .duration = INPUT_MODE_DURAT
 PlayerState HIT_MODE_STATE = {.kind = HIT, .duration = HIT_DURATION_FRAMES, .cnt = 0};
 PlayerState WALK_MODE_STATE = {.kind = WALK, .duration = WALK_ANIMATION_DURATION_FRAMES, .cnt = 0};
 
+void set_state(Game* game, thing_idx idx, State state)
+{
+    assert(idx < MAX_THINGS);
+    game->things[idx].state = state; 
+    game->things[idx].state_cnt = 0;
+}
+
 void walk_start(Player* player, State kind)
 {
 
@@ -189,6 +199,11 @@ void draw_hit_text(Game* game)
     // DrawLine(0, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, SCREEN_WIDTH, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, BLACK);
 }
 
+bool is_vec2_equal(Vector2 v1, Vector2 v2)
+{
+    if ((v1.x == v2.x) && (v1.y == v2.y)) return true;
+    return false;
+}
 
 void draw_stage()
 {
@@ -200,9 +215,12 @@ thing_idx get_animation(Game* game, thing_idx idx)
 {
     Thing * player = &game->things[idx];
     thing_idx animation_idx = player->state + player->kind * STATE_NUM;
+    if (!is_vec2_equal(player->orientation, default_orientation))
+    {
+        animation_idx += STATE_NUM;
+    }        
     TraceLog(LOG_DEBUG,  "Animation idx:   %d", animation_idx);
     return animation_idx;
-    //Animation * animation = game.animations[animation_idx];
 }
 
 bool draw_player(Game * game)
@@ -321,7 +339,6 @@ void process_game_state(Game* game)
         }
         case WALK:
         {
-            Vector2 default_orientation = {.x = 1, .y = 0};
             if ((player->orientation.x == default_orientation.x ) && (player->orientation.y == default_orientation.y))
             {
                 player->position.x += WALK_INCREMENT_PIXEL_PER_FRAME;
@@ -418,19 +435,30 @@ void process_input(Game* game)
                 player->state = INPUT_MODE;
                 player->state_cnt = 0;
         }
-            // if (IsKeyDown(KEY_L)) 
-            // {
-            //     game.p1.heading_right = true;
-            //     walk_start(&game.p1, WALK);
-            // }
-            // if (IsKeyDown(KEY_H)) 
-            // {
-            //     game.p1.heading_right = false;
-            //     walk_start(&game.p1, WALK);
-            // }
+        if (player->state != WALK)
+        {
+            if (IsKeyDown(KEY_L)) 
+            {
+                player->orientation.x = 1;
+                player->orientation.y = 0;
+                player->state = WALK;
+                player->state_cnt = 0;
+            }
+            if (IsKeyDown(KEY_H)) 
+            {
+                player->orientation.x = -1;
+                player->orientation.y = 0;
+                player->state = WALK;
+                player->state_cnt = 0;
+            }   
         }
-    
+        else
+        {
+            if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H))) set_state(game, game->player_idx, IDLE);
+        }
+    }
 }
+
 int main(void)
 {
     srand(time(0));

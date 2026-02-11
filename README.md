@@ -13,7 +13,9 @@ $ ./nob -run
 - [x] Hit animation
 - [x] Add walk inputs and animation 
 - [x] Add orientation for all actions
-- [ ] Add input text capturing 
+- [x] Add input text capturing 
+- [ ] Add default texture
+ 
 - [ ] Second player
 - [ ] Defend mode
 - [ ] Health bars
