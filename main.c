@@ -21,7 +21,7 @@
 
 #define GOOD_CPM                                    300
 
-#define FRAMERATE                                   60 
+#define FRAMERATE                                   60
 #define MS_PER_FRAME                                (1000/FRAMERATE)
 
 #define PLAYER_STATE_CAPACITY                       12
@@ -30,7 +30,7 @@
 #define KNIGHT_FIGURE_OFFSET                        64
 
 #define HIT_DURATION_MS                             3000.0f
-#define HIT_DURATION_FRAMES                         ((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
+#define HIT_DURATION_FRAMES                         (int)((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
 #define HIT_ANIMATION_FRAMES                        3
 
 #define IDLE_DURATION_MS                            1000                               
@@ -174,7 +174,7 @@ size_t init_animation(
     anim->player_position_offset = sprite_set.player_position_offset;
 
     if ((traits & HAS_DIRECTION) == HAS_DIRECTION)
-    {
+    {    
         total_animations += STATE_NUM;
         animation_idx = animation_idx + STATE_NUM;
         assert(animation_idx < MAX_ANIMATIONS);
@@ -214,6 +214,8 @@ void set_state(Game* game, thing_idx idx, State state)
 
 Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
 {
+    // assert(anim->stages_num - 1 >= frame_num);
+    if (frame_num > anim->stages_num - 1) frame_num = anim->stages_num - 1;
     Rectangle frame_rect = {0};
     frame_rect.y = 0;
     frame_rect.x = anim->start_offset_pixel + frame_num * (anim->offset_between_stages + anim->figure_width);
@@ -269,6 +271,7 @@ bool draw_player(Game * game)
     size_t animation_frame = ((float)player->state_cnt/(float)state_duration) * animation->stages_num;
     Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
 
+    TraceLog(LOG_INFO,  "Animation frame:   %ld", animation_frame);
     //printf("%ld,%ld, %f %f \n", player->state_cnt, animation_frame,  frame_rect.x, frame_rect.y);
 
     Vector2 texture_position = {.x = player->position.x - animation->player_position_offset ,  .y = player->position.y - animation->texture.height};
@@ -410,18 +413,6 @@ void load_animations(Game* game, SpriteSet sprites, thing_idx animations_start_i
         Image image = LoadImage(sprites.sprites[kind].path);
         assert(sprite.num != 0);
 
-//     size_t init_animation(
-//     Animation* animations, 
-//     thing_idx first_anim_idx_for_thing_kind, 
-//     Traits traits, 
-//     State state, 
-//     Image img, 
-//     size_t stages_num, 
-//     size_t start_offset_pixel, 
-//     size_t offset_between_stages, 
-//     size_t figure_width, 
-//     size_t player_position_offset
-// )
         switch(kind)
         {
             case IDLE_IMAGE:
@@ -476,54 +467,18 @@ Game init_game()
     knigth_set.player_position_offset = 32; 
     load_animations(&game, knigth_set, 0, player_traits);
  
-    SpriteSet orc_set = {0};
-    orc_set.sprites[IDLE_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
-    orc_set.sprites[ATTACK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
-    orc_set.sprites[WALK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
-    orc_set.sprites[IDLE_IMAGE].num = 5;
-    orc_set.sprites[ATTACK_IMAGE].num = 4;
-    orc_set.sprites[WALK_IMAGE].num = 7;
-    orc_set.start_offset_pixel = 0;
-    orc_set.offset_between_stages = 48;
-    orc_set.figure_width = 48; 
-    orc_set.player_position_offset = 48; 
-    load_animations(&game, orc_set, 0, player_traits);
-
-    // { 
-    //     Image idle_image = LoadImage("assets/Knight_1/Idle.png");
-    //     Image attack_image = LoadImage("assets/Knight_1/Attack 3.png");
-    //     Image input_image = ImageCopy(attack_image);
-    //     ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = attack_image.width/4, .height = attack_image.height});
-
-    //     Image hit_image = ImageCopy(attack_image);
-    //     ImageCrop(&hit_image, (Rectangle){.x = attack_image.width/4, .y = 0, .width = 3*attack_image.width/4, .height = attack_image.height});
-    //     Image walk_right_image = LoadImage("assets/Knight_1/Walk.png");
-
-
-
-    //     thing_idx player_animations_start_idx = 0; 
-    //     size_t player_offset = 32; 
-// size_t stages_num, size_t start_offset_pixel, size_t offset_between_stages, size_t figure_width, size_t player_position_offset)
-    //     init_animation(game.animations, player_animations_start_idx, player_traits, IDLE, idle_image, 4, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    //     init_animation(game.animations, player_animations_start_idx, player_traits, HIT, hit_image, 3, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    //     init_animation(game.animations, player_animations_start_idx, player_traits, INPUT_MODE, input_image, 1, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-    //     size_t last_animation = init_animation(game.animations, player_animations_start_idx, player_traits, WALK, walk_right_image, 8, 0, KNIGHT_FIGURE_OFFSET, KNIGHT_FIGURE_WIDTH_PX, player_offset);
-
-    //     UnloadImage(idle_image);
-    //     UnloadImage(attack_image);
-    //     UnloadImage(input_image);
-    //     UnloadImage(hit_image);
-    //     UnloadImage(walk_right_image);
-    // }
-    // size_t ORC_ATTACK_SPRITES = 5;
-    //Image idle_orc = LoadImage("assets/Craftpix_Orc/Orc_Berserk/Idle.png");
-    //Image attack_orc = LoadImage("assets/Craftpix_Orc/Orc_Berserk/Attack_2.png");
-    //Image input_orc = ImageCopy(attack_orc);
-    //ImageCrop(&input_orc, (Rectangle){.x = 0, .y = 0, .width = attack_image.width/ORC_ATTACK_SPRITES, .height = attack_orc.height});
-
-    //Image hit_orc = ImageCopy(attack_orc);
-    //ImageCrop(&hit_orc, (Rectangle){.x = attack_image.width/ORC_ATTACK_SPRITES, .y = 0, .width = (ORC_ATTACK_SPRITES -1)*attack_image.width/ORC_ATTACK_SPRITES, .height = attack_orc.height});
-    //Image walk_orc = LoadImage("assets/Craftpix_Orc/Orc_Berserk/Walk.png");
+    // SpriteSet orc_set = {0};
+    // orc_set.sprites[IDLE_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
+    // orc_set.sprites[ATTACK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
+    // orc_set.sprites[WALK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
+    // orc_set.sprites[IDLE_IMAGE].num = 5;
+    // orc_set.sprites[ATTACK_IMAGE].num = 4;
+    // orc_set.sprites[WALK_IMAGE].num = 7;
+    // orc_set.start_offset_pixel = 0;
+    // orc_set.offset_between_stages = 48;
+    // orc_set.figure_width = 48; 
+    // orc_set.player_position_offset = 48; 
+    // load_animations(&game, orc_set, 0, player_traits);
     return game;
 }
 
@@ -608,7 +563,7 @@ int main(void)
         // if(IsKeyReleased(KEY_L)) walk_stop(&game.p1);
         // if(IsKeyReleased(KEY_H)) walk_stop(&game.p1);
         // game.p1_last_captured_key = ch; 
-        TraceLog(LOG_INFO,  "STATE:  (%d) %d", player->state, player->state_cnt);
+        TraceLog(LOG_DEBUG,  "STATE:  (%d) %d", player->state, player->state_cnt);
         process_game_state(&game);
         draw_game(&game);
         increment_game(&game);
