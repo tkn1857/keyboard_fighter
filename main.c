@@ -29,7 +29,7 @@
 #define KNIGHT_FIGURE_WIDTH_PX                      64
 #define KNIGHT_FIGURE_OFFSET                        64
 
-#define HIT_DURATION_MS                             3000.0f
+#define HIT_DURATION_MS                             300.0f
 #define HIT_DURATION_FRAMES                         (int)((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
 #define HIT_ANIMATION_FRAMES                        3
 
@@ -149,6 +149,8 @@ Traits player_traits = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT;
 
 bool is_vec2_equal(Vector2 v1, Vector2 v2);
 
+
+
 size_t init_animation(
     Animation* animations, 
     thing_idx first_anim_idx_for_thing_kind, 
@@ -156,7 +158,7 @@ size_t init_animation(
     State state, 
     Image img, 
     SpriteSet sprite_set,
-    thing_idx sprite_idx
+    size_t sprite_num
 )
 {
     // one animation for each state
@@ -167,7 +169,7 @@ size_t init_animation(
     assert(animation_idx < MAX_ANIMATIONS);
     Animation* anim = &animations[animation_idx];
     anim->texture = LoadTextureFromImage(img);
-    anim->stages_num = sprite_set.sprites[sprite_idx].num;
+    anim->stages_num = sprite_num;
     anim->start_offset_pixel = sprite_set.start_offset_pixel;
     anim->offset_between_stages = sprite_set.offset_between_stages;
     anim->figure_width = sprite_set.figure_width;
@@ -184,14 +186,57 @@ size_t init_animation(
         Image inversed_image = ImageCopy(img);
         ImageFlipHorizontal(&inversed_image);
         anim->texture = LoadTextureFromImage(inversed_image);
-        anim->stages_num = sprite_set.sprites[sprite_idx].num;
-        anim->start_offset_pixel = sprite_set.start_offset_pixel;
+        anim->stages_num = sprite_num;
+        // anim->start_offset_pixel = sprite_set.start_offset_pixel;
+        anim->start_offset_pixel = sprite_set.start_offset_pixel; 
         anim->offset_between_stages = sprite_set.offset_between_stages;
         anim->figure_width = sprite_set.figure_width;
         anim->player_position_offset = width - sprite_set.player_position_offset;
         UnloadImage(inversed_image);
     }
     return total_animations;
+}
+
+void load_animations(Game* game, SpriteSet sprites, thing_idx animations_start_idx, Traits traits)
+{
+    for(ImageKind kind = 0; kind < IMAGE_KIND_NUM; kind++)
+    {
+        Sprite sprite = sprites.sprites[kind]; 
+        Image image = LoadImage(sprites.sprites[kind].path);
+        assert(sprite.num != 0);
+
+        switch(kind)
+        {
+            case IDLE_IMAGE:
+            {
+                init_animation(game->animations, animations_start_idx, traits, IDLE, image, sprites, sprite.num);
+                break;
+            }   
+            case ATTACK_IMAGE:
+            {
+                size_t sprite_num = sprite.num;
+                Image input_image = ImageCopy(image);
+                ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = image.width/sprite_num, .height = image.height});
+                Image hit_image = ImageCopy(image);
+                ImageCrop(&hit_image, (Rectangle){.x = image.width/sprite_num, .y = 0, .width = ((sprite_num - 1)*image.width)/sprite_num, .height = image.height});
+                init_animation(game->animations, animations_start_idx, traits, INPUT_MODE, input_image, sprites, 1);
+                init_animation(game->animations, animations_start_idx, traits, HIT, hit_image, sprites, sprite.num - 1);
+                UnloadImage(input_image);
+                UnloadImage(hit_image);
+                break;
+            }   
+            case WALK_IMAGE:
+            {
+                init_animation(game->animations, animations_start_idx, traits, WALK, image, sprites, sprite.num);
+                break;
+            }
+            default:
+            {
+                assert(false);
+            }
+        }
+        UnloadImage(image);
+    }   
 }
 
 thing_idx get_animation_idx(Game* game, thing_idx idx)
@@ -215,10 +260,11 @@ void set_state(Game* game, thing_idx idx, State state)
 Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
 {
     // assert(anim->stages_num - 1 >= frame_num);
-    if (frame_num > anim->stages_num - 1) frame_num = anim->stages_num - 1;
+    if (frame_num > anim->stages_num - 1) frame_num = anim->stages_num - 1; // understand why this needed
     Rectangle frame_rect = {0};
     frame_rect.y = 0;
     frame_rect.x = anim->start_offset_pixel + frame_num * (anim->offset_between_stages + anim->figure_width);
+    assert(frame_rect.x <= anim->texture.width);
     frame_rect.width =  anim->figure_width * 2;
     frame_rect.height = anim->texture.height;
     return frame_rect;
@@ -273,6 +319,10 @@ bool draw_player(Game * game)
 
     TraceLog(LOG_INFO,  "Animation frame:   %ld", animation_frame);
     //printf("%ld,%ld, %f %f \n", player->state_cnt, animation_frame,  frame_rect.x, frame_rect.y);
+    if (player->state == HIT)
+    {
+        // asm("int3");
+    }
 
     Vector2 texture_position = {.x = player->position.x - animation->player_position_offset ,  .y = player->position.y - animation->texture.height};
     DrawTextureRec(animation->texture, frame_rect, texture_position, WHITE);
@@ -405,47 +455,7 @@ void init_player(Game* game, thing_idx idx)
     set_state(game, game->player_idx, IDLE);
 }
 
-void load_animations(Game* game, SpriteSet sprites, thing_idx animations_start_idx, Traits traits)
-{
-    for(ImageKind kind = 0; kind < IMAGE_KIND_NUM; kind++)
-    {
-        Sprite sprite = sprites.sprites[kind]; 
-        Image image = LoadImage(sprites.sprites[kind].path);
-        assert(sprite.num != 0);
 
-        switch(kind)
-        {
-            case IDLE_IMAGE:
-            {
-                init_animation(game->animations, animations_start_idx, traits, IDLE, image, sprites, kind);
-                break;
-            }   
-            case ATTACK_IMAGE:
-            {
-                size_t sprite_num = sprite.num;
-                Image input_image = ImageCopy(image);
-                ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = image.width/sprite_num, .height = image.height});
-                Image hit_image = ImageCopy(image);
-                ImageCrop(&hit_image, (Rectangle){.x = image.width/sprite_num, .y = 0, .width = (sprite_num - 1)*image.width/sprite_num, .height = image.height});
-                init_animation(game->animations, animations_start_idx, traits, INPUT_MODE, input_image, sprites, kind);
-                init_animation(game->animations, animations_start_idx, traits, HIT, hit_image, sprites, kind);
-                UnloadImage(input_image);
-                UnloadImage(hit_image);
-                break;
-            }   
-            case WALK_IMAGE:
-            {
-                init_animation(game->animations, animations_start_idx, traits, WALK, image, sprites, kind);
-                break;
-            }
-            default:
-            {
-                assert(false);
-            }
-        }
-        UnloadImage(image);
-    }   
-}
 
 Game init_game()
 {
@@ -467,18 +477,18 @@ Game init_game()
     knigth_set.player_position_offset = 32; 
     load_animations(&game, knigth_set, 0, player_traits);
  
-    // SpriteSet orc_set = {0};
-    // orc_set.sprites[IDLE_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
-    // orc_set.sprites[ATTACK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
-    // orc_set.sprites[WALK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
-    // orc_set.sprites[IDLE_IMAGE].num = 5;
-    // orc_set.sprites[ATTACK_IMAGE].num = 4;
-    // orc_set.sprites[WALK_IMAGE].num = 7;
-    // orc_set.start_offset_pixel = 0;
-    // orc_set.offset_between_stages = 48;
-    // orc_set.figure_width = 48; 
-    // orc_set.player_position_offset = 48; 
-    // load_animations(&game, orc_set, 0, player_traits);
+    SpriteSet orc_set = {0};
+    orc_set.sprites[IDLE_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
+    orc_set.sprites[ATTACK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
+    orc_set.sprites[WALK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
+    orc_set.sprites[IDLE_IMAGE].num = 5;
+    orc_set.sprites[ATTACK_IMAGE].num = 4;
+    orc_set.sprites[WALK_IMAGE].num = 7;
+    orc_set.start_offset_pixel = 0;
+    orc_set.offset_between_stages = 48;
+    orc_set.figure_width = 48; 
+    orc_set.player_position_offset = 48; 
+    load_animations(&game, orc_set, 0, player_traits);
     return game;
 }
 
