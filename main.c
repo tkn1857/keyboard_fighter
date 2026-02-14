@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "raylib.h"
+#include "raymath.h"
 
 #define MAX_THINGS                                  1024
 #define MAX_ANIMATIONS                              1024
@@ -63,6 +64,7 @@ typedef enum
 } Traits;
 
 Traits ENEMY_TRAITS_DEFAULT = ENEMY|NPC|POSITIONABLE|HAS_DIRECTION|CAN_HIT;
+Traits player_traits = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT;
 
 typedef enum 
 {
@@ -147,7 +149,6 @@ typedef struct
     size_t thing_num;
 } Game;
 
-Traits player_traits = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT;
 
 bool is_vec2_equal(Vector2 v1, Vector2 v2);
 
@@ -420,7 +421,7 @@ void increment_game(Game* game)
     {
         Thing* thing = &game->things[i];
         size_t current_state_dur = thing->state_dur[thing->state];
-        if (current_state_dur <= thing->state_cnt)
+        if (current_state_dur == thing->state_cnt)
         {
             set_state(game, i, IDLE);
         }
@@ -547,6 +548,36 @@ void process_input(Game* game)
     }
 }
 
+
+void npc_ai(Game* game)
+{
+    for(thing_idx i = 0; i < MAX_THINGS; i++)
+    {
+        Thing* thing = &game->things[i];
+        Thing* player = &game->things[game->player_idx];
+        if ((thing->traits & ENEMY) == ENEMY)
+        {
+            {
+                Vector2 direction_to_player = {0};
+                direction_to_player.x = player->position.x - thing->position.x;
+                direction_to_player.y = player->position.y - thing->position.y;
+                float len = Vector2Length(direction_to_player);
+                if (len > 0.0001f)
+                {   
+                    direction_to_player.x /= len;
+                    direction_to_player.y /= len;
+                    thing->orientation = direction_to_player;
+                }
+                // asm("int3");
+            }
+            float dist_to_player = Vector2Distance(thing->position, player->position);
+            if (dist_to_player <= thing->reach/2)
+            {
+            }
+        }
+    }
+}
+
 int main(void)
 {
     srand(time(0));
@@ -584,6 +615,7 @@ int main(void)
         // if(IsKeyReleased(KEY_L)) walk_stop(&game.p1);
         // if(IsKeyReleased(KEY_H)) walk_stop(&game.p1);
         // game.p1_last_captured_key = ch; 
+        npc_ai(&game);
         TraceLog(LOG_DEBUG,  "STATE:  (%d) %d", player->state, player->state_cnt);
         process_game_state(&game);
         draw_game(&game);
