@@ -102,6 +102,7 @@ typedef struct{
     thing_idx hit_text_idx;
     Rectangle hitbox;
     float reach; // in percent from total stage len
+    // size_t default_walk_speed;
 } Thing;
 
 typedef enum
@@ -363,7 +364,6 @@ void generate_hit_text(Game* game)
 
 void process_game_state(Game* game)
 {
-
     for(thing_idx i = 0; i < MAX_THINGS; i++)
     {
         Thing* player = &game->things[i];
@@ -399,11 +399,11 @@ void process_game_state(Game* game)
             {
                 if (is_vec2_equal(player->orientation, default_orientation))
                 {
-                    player->position.x += WALK_INCREMENT_PIXEL_PER_FRAME;
+                    player->position.x += player->walk_speed;
                 }
                 else
                 {
-                    player->position.x -= WALK_INCREMENT_PIXEL_PER_FRAME;
+                    player->position.x -= player->walk_speed;
                 }
                 break;
             }
@@ -421,10 +421,20 @@ void increment_game(Game* game)
     {
         Thing* thing = &game->things[i];
         size_t current_state_dur = thing->state_dur[thing->state];
-        if (current_state_dur == thing->state_cnt)
+        if (current_state_dur == thing->state_cnt) 
         {
             set_state(game, i, IDLE);
+            // thing->walk_speed = 0;
         }
+        // if (thing->walk_speed == 0)
+        // {
+        //     set_state(game, i, IDLE);
+        // }
+        if ((thing->walk_speed != 0) && (thing->state != WALK))
+        {
+            set_state(game, i, WALK);
+            // thing->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
+        }   
         thing->state_cnt++;
     }
 }
@@ -520,30 +530,38 @@ void process_input(Game* game)
         if (game->key_pressed == 'i')
         {
                 //enter_input_mode(&game.p1);
-                printf("Entering input mode\n");
-                player->state = INPUT_MODE;
-                player->state_cnt = 0;
+            if ((player->state == IDLE) || (player->state == WALK)) 
+            {
+                set_state(game, game->player_idx, INPUT_MODE);
+                player->walk_speed = 0;
+            }
+
         }
-        if (player->state != WALK)
+        if (player->walk_speed == 0)
         {
+            if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)))
+            {
+                // set_state(game, game->player_idx, WALK);
+                player->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
+            } 
             if (IsKeyDown(KEY_L)) 
             {
                 player->orientation.x = 1;
                 player->orientation.y = 0;
-                player->state = WALK;
-                player->state_cnt = 0;
             }
             if (IsKeyDown(KEY_H)) 
             {
                 player->orientation.x = -1;
                 player->orientation.y = 0;
-                player->state = WALK;
-                player->state_cnt = 0;
             }   
         }
         else
         {
-            if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H))) set_state(game, game->player_idx, IDLE);
+            if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H)))
+            {
+                player->walk_speed = 0;
+                set_state(game, game->player_idx, IDLE);
+            }
         }
     }
 }
@@ -571,8 +589,15 @@ void npc_ai(Game* game)
                 // asm("int3");
             }
             float dist_to_player = Vector2Distance(thing->position, player->position);
-            if (dist_to_player <= thing->reach/2)
+            if (dist_to_player > 64)
+            // if (!Vector2Equals(thing->position, player->position))
             {
+                thing->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME/2;
+            }
+            else
+            {
+                thing->walk_speed = 0;
+                set_state(game, i, IDLE);
             }
         }
     }
@@ -604,17 +629,6 @@ int main(void)
         game.key_pressed = ch;
         process_input(&game);
         Thing* player = &game.things[game.player_idx];
-            //     walk_start(&game.p1, WALK);
-            // }
-            // if (IsKeyDown(KEY_H)) 
-            // {
-            //     game.p1.heading_right = false;
-            //     walk_start(&game.p1, WALK);
-            // }
-        // printf("state: %d\n" , player->state);
-        // if(IsKeyReleased(KEY_L)) walk_stop(&game.p1);
-        // if(IsKeyReleased(KEY_H)) walk_stop(&game.p1);
-        // game.p1_last_captured_key = ch; 
         npc_ai(&game);
         TraceLog(LOG_DEBUG,  "STATE:  (%d) %d", player->state, player->state_cnt);
         process_game_state(&game);
