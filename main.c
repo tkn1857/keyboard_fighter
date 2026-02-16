@@ -43,6 +43,10 @@
 #define WALK_SPEED_PERC_PER_MS                      0.02f 
 #define WALK_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*WALK_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
 
+#define NUM_COLUMNS                                 40
+#define COLUMN_CELL_WIDTH                           SCREEN_WIDTH/NUM_COLUMNS
+#define COLUMN_CELL_HEIGHT                          20
+
 typedef int thing_idx;
 
 Vector2 default_orientation = {.x = 1, .y = 0};
@@ -67,6 +71,8 @@ typedef enum
     MOVING = (1<<2),
     LOOKS_LEFT = (1<<3),
     INPUTTING = (1<<4),
+    MOVING_FAST = (1<<5),
+    INPUT_MOVE = (1<<6),
 } Attributes;
 
 Traits ENEMY_TRAITS_DEFAULT = ENEMY|NPC|POSITIONABLE|HAS_DIRECTION|CAN_HIT;
@@ -77,6 +83,7 @@ typedef enum{
     DEFAULT = 0,
     KNIGHT,
     ORC,
+    COLUMN_CELL,
     THING_KIND_NUM
 } ThingKind;
 
@@ -89,8 +96,9 @@ typedef struct{
     int health;
     Vector2 position;
     Vector2 orientation;
-    float walk_speed; // in percent from total stage per 1 ms
+    float walk_speed;
     thing_idx hit_text_idx;
+    size_t hit_text_size;
     Rectangle hitbox;
     float reach; // in percent from total stage len
     size_t default_walk_speed_px;
@@ -324,10 +332,17 @@ void draw_hit_text(Game* game)
     // DrawLine(0, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, SCREEN_WIDTH, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, BLACK);
 }
 
-void draw_stage()
+void draw_stage(Game* game)
 {
     DrawLine(0, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
-    //DrawLine(int startPosX, int startPosY, int endPosX, int endPosY, Color color);                // Draw a line 
+    for(thing_idx i = 0; i < game->thing_num; i++)
+    {
+        
+        Thing* thing = &game->things[i];
+        if(thing->kind != COLUMN_CELL) continue;
+        DrawRectangleLines(thing->position.x - COLUMN_CELL_WIDTH/2, STAGE_COORDINATE, COLUMN_CELL_WIDTH, COLUMN_CELL_HEIGHT, RED);
+        // RLAPI void DrawRectangle(int posX, int posY, int width, int height, Color color);
+    }
 }
 
 bool draw_things(Game * game)
@@ -337,6 +352,7 @@ bool draw_things(Game * game)
         Thing * thing = &game->things[i];
         if(thing->kind == DEFAULT) continue;
         thing_idx animation_idx = get_animation_idx(game, i);
+        if (animation_idx < 0) return true;
         Animation* animation = &game->animations[animation_idx];
         int state_duration = animation->duration_frames;
         assert(state_duration != 0);
@@ -470,9 +486,10 @@ void init_player(Game* game, thing_idx idx)
     game->thing_num++;
 }
 
-void init_orc(Game* game, thing_idx idx)
+void init_orc(Game* game)
 {
     Vector2 position = {3 * SCREEN_WIDTH/4, STAGE_COORDINATE};
+    thing_idx idx = game->thing_num;
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
@@ -487,7 +504,7 @@ Game init_game()
     generate_hit_text(&game);
     game.player_idx = 0;
     init_player(&game, game.player_idx);
-    init_orc(&game, 1);
+    init_orc(&game) ;
 
     SpriteSet knigth_set = {0};
     knigth_set.kind = KNIGHT;
@@ -517,12 +534,23 @@ Game init_game()
     orc_set.player_position_offset = 48; 
     load_animations(&game, orc_set, ENEMY_TRAITS_DEFAULT);
 
+    int start_pos_x = COLUMN_CELL_WIDTH/2;
+    for (thing_idx i = 0; i < NUM_COLUMNS; i++)
+    {
+        Thing* thing = &game.things[game.thing_num]; 
+        // memset(thing, 
+        thing->position.x = start_pos_x;
+        thing->position.y = STAGE_COORDINATE;
+        thing->kind = COLUMN_CELL;
+        game.thing_num++; 
+        start_pos_x += COLUMN_CELL_WIDTH;
+    }
     return game;
 }
 
 void draw_game(Game* game)
 {
-    draw_stage();
+    draw_stage(game);
     draw_hit_text(game);
     draw_things(game);
 }
