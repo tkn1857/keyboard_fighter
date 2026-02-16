@@ -18,7 +18,7 @@
 #define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
 #define HIT_TEXT_CAPACITY                           500
 
-#define STAGE_COORDINATE                            SCREEN_HEIGHT*0.8 
+#define STAGE_COORDINATE                            SCREEN_HEIGHT*0.9 
 
 #define GOOD_CPM                                    300
 
@@ -42,9 +42,6 @@
 #define WALK_ANIMATION_DURATION_FRAMES              (int)((int)WALK_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
 #define WALK_SPEED_PERC_PER_MS                      0.02f 
 #define WALK_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*WALK_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
-
-#define LEFT_HEADING_ANIMATION_OFFSET STATE_NUM
-#define KEY_PRESSED_BUF_CAP                         12
 
 typedef int thing_idx;
 
@@ -86,7 +83,6 @@ typedef enum{
 typedef struct{
     Traits traits;
     ThingKind kind;
-    thing_idx animations_start_idx;
     Attributes attr;
     size_t state_cnt;
     int damage;
@@ -194,9 +190,6 @@ size_t init_animation(
     size_t duration_frames
 )
 {
-    // one animation for each state
-    // 
-    // if has direction double the animations 
     size_t animation_idx = game->animation_num++;
     assert(animation_idx < MAX_ANIMATIONS);
     Animation* anim = &game->animations[animation_idx];
@@ -331,12 +324,6 @@ void draw_hit_text(Game* game)
     // DrawLine(0, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, SCREEN_WIDTH, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, BLACK);
 }
 
-bool is_vec2_equal(Vector2 v1, Vector2 v2)
-{
-    if ((v1.x == v2.x) && (v1.y == v2.y)) return true;
-    return false;
-}
-
 void draw_stage()
 {
     DrawLine(0, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
@@ -375,7 +362,7 @@ void generate_hit_text(Game* game)
 void calc_attributes(Game* game)
 {
     
-    for(thing_idx i = 0; i < game->thing_num; i++)
+    for(thing_idx i = 0; i < (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
         if ((thing->walk_speed != 0) && (!check_bitmask(thing->attr, MOVING)))
@@ -393,7 +380,7 @@ void calc_attributes(Game* game)
 void process_game(Game* game)
 {
     calc_attributes(game);
-    for(thing_idx i = 0; i < game->thing_num; i++)
+    for(thing_idx i = 0; i < (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
 
@@ -405,38 +392,31 @@ void process_game(Game* game)
         {
             if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
             {
-
-                // thing->attr = clear_bit(thing->attr, INPUTTING);
                 thing->attr = HITTING;
                 state_transition(game, i);
-                continue;
+                // continue;
             }
             if (game->key_pressed == game->hit_text[thing->hit_text_idx])
             {
                 thing->damage += 1;
                 thing->hit_text_idx = (thing->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
             }
-            // return;
-            continue;
         }
         if (check_bitmask(thing->attr, HITTING))
         {
             if (current_state_dur == thing->state_cnt)
             {
                 thing->damage = 0;
-                // thing->attr = clear_bit(thing->attr, HITTING);
-                // thing->attr = set_bit(thing->attr, IDLING);
-                // state_transition(game, i);
             }
-            continue;
+            // continue;
         }
         if (check_bitmask(thing->attr, MOVING))
         {
+            // needed to stop immidiately after after walk speed is 0
             if ((thing->walk_speed == 0) && (check_bitmask(thing->attr, MOVING)))
             {
                 thing->state_cnt = anim->duration_frames;
             }
-            // asm("int3");         
             if (Vector2Equals(thing->orientation, default_orientation))
             {
                 thing->position.x += thing->walk_speed;
@@ -445,7 +425,7 @@ void process_game(Game* game)
             {
                 thing->position.x -= thing->walk_speed;
             }
-            continue;
+            // continue;
         }
     }   
 }   
@@ -453,13 +433,12 @@ void process_game(Game* game)
 
 void increment_game(Game* game)
 {
-    for(int i = 0; i < game->thing_num; i++)
+    for(int i = 0; i < (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
         size_t anim_idx = get_animation_idx(game, i);
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
-        // asm("int3");         
         if (current_state_dur <= thing->state_cnt) 
         {
             if(thing->walk_speed == 0)
@@ -486,10 +465,6 @@ void init_player(Game* game, thing_idx idx)
     game->things[idx].orientation.y = 0;
     game->things[idx].attr = IDLING;
     game->things[idx].walk_speed = 0;
-    // game->things[idx].state_dur[IDLE] = IDLE_DURATION_FRAMES;
-    // game->things[idx].state_dur[INPUT_MODE] = INPUT_MODE_DURATION_FRAMES;
-    // game->things[idx].state_dur[HIT] = HIT_DURATION_FRAMES;
-    // game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
     game->things[idx].traits = player_traits;
     game->things[idx].kind = KNIGHT;
     game->thing_num++;
@@ -501,11 +476,6 @@ void init_orc(Game* game, thing_idx idx)
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
-
-    // game->things[idx].state_dur[IDLE] = IDLE_DURATION_FRAMES;
-    // game->things[idx].state_dur[INPUT_MODE] = INPUT_MODE_DURATION_FRAMES;
-    // game->things[idx].state_dur[HIT] = HIT_DURATION_FRAMES;
-    // game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
     game->things[idx].traits = ENEMY_TRAITS_DEFAULT;
     game->things[idx].kind = ORC;
     game->thing_num++;
@@ -531,7 +501,7 @@ Game init_game()
     knigth_set.offset_between_stages = 64;
     knigth_set.figure_width = 64;
     knigth_set.player_position_offset = 32; 
-    size_t knight_animation_num = load_animations(&game, knigth_set, player_traits);
+    load_animations(&game, knigth_set, player_traits);
 
     SpriteSet orc_set = {0};
     orc_set.kind = ORC;
@@ -545,9 +515,8 @@ Game init_game()
     orc_set.offset_between_stages = 48;
     orc_set.figure_width = 48; 
     orc_set.player_position_offset = 48; 
-    size_t orc_animation_num = load_animations(&game, orc_set, player_traits);
+    load_animations(&game, orc_set, ENEMY_TRAITS_DEFAULT);
 
-    (void)orc_animation_num;
     return game;
 }
 
@@ -555,7 +524,6 @@ void draw_game(Game* game)
 {
     draw_stage();
     draw_hit_text(game);
-    // draw_player(game);
     draw_things(game);
 }
 
@@ -574,37 +542,28 @@ void process_input(Game* game)
                 return;
             }
         }
+        if (IsKeyDown(KEY_L)) 
+        {
+            player->orientation.x = 1;
+            player->orientation.y = 0;
+        }
+        if (IsKeyDown(KEY_H)) 
+        {
+            player->orientation.x = -1;
+            player->orientation.y = 0;
+        }   
         if (player->walk_speed == 0)
         {
             if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)))
             {
-                // set_state(game, game->player_idx, WALK);
-                player->attr = MOVING;
                 player->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
-                // player->attr = set_bit(player->attr, MOVING);
-                state_transition(game, game->player_idx);
             } 
-            if (IsKeyDown(KEY_L)) 
-            {
-                player->attr = clear_bit(player->attr, LOOKS_LEFT);
-                player->orientation.x = 1;
-                player->orientation.y = 0;
-            }
-            if (IsKeyDown(KEY_H)) 
-            {
-                player->attr = set_bit(player->attr, LOOKS_LEFT);
-                player->orientation.x = -1;
-                player->orientation.y = 0;
-            }   
         }
         else
         {
             if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H)))
             {
                 player->walk_speed = 0;
-                player->attr = clear_bit(player->attr, MOVING);
-                player->attr = set_bit(player->attr, IDLING);
-                state_transition(game, game->player_idx);
             }
         }
     }
