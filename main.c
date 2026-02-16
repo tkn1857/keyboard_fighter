@@ -50,6 +50,8 @@ typedef int thing_idx;
 
 Vector2 default_orientation = {.x = 1, .y = 0};
 
+size_t animation_num = 0;
+
 typedef enum
 {
     POSITIONABLE = (1<<0),
@@ -67,24 +69,12 @@ typedef enum
     HITTING = (1<<1),
     MOVING = (1<<2),
     LOOKS_LEFT = (1<<3),
+    INPUTTING = (1<<4),
 } Attributes;
 
 Traits ENEMY_TRAITS_DEFAULT = ENEMY|NPC|POSITIONABLE|HAS_DIRECTION|CAN_HIT;
 Traits player_traits = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT;
 
-typedef enum 
-{
-    IDLE = 0,
-    INPUT_MODE,
-    HIT,
-    RECOVERY,
-    WALK,
-    DEFEND,
-    RUN,
-    TAKING_DAMAGE,
-    DYING,
-    STATE_NUM
-} State;
 
 typedef enum{
     DEFAULT = 0,
@@ -98,7 +88,6 @@ typedef struct{
     ThingKind kind;
     thing_idx animations_start_idx;
     Attributes attr;
-    State state;
     size_t state_cnt;
     int damage;
     int health;
@@ -128,7 +117,8 @@ typedef struct
 
 typedef struct
 {
-    Sprite sprites[STATE_NUM];
+    Sprite sprites[IMAGE_KIND_NUM];
+    ThingKind kind;
     size_t start_offset_pixel; 
     size_t offset_between_stages;
     size_t figure_width; 
@@ -138,6 +128,8 @@ typedef struct
 typedef struct
 {
     Texture2D texture;
+    Attributes attr;
+    ThingKind kind;
     size_t sprite_num;
     size_t start_offset_pixel;
     size_t offset_between_stages;
@@ -150,23 +142,52 @@ typedef struct
 {
     Thing things[MAX_THINGS];
     Animation animations[MAX_ANIMATIONS];
-    size_t animation_offsets[THING_KIND_NUM];
     char hit_text[HIT_TEXT_CAPACITY];
     char key_pressed;
     thing_idx player_idx;
     size_t thing_num;
+    size_t animation_num;
 } Game;
 
+void state_transition(Game* game, thing_idx idx)
+{
+    Thing* thing = &game->things[idx];
+    thing->state_cnt = 0;
+}
+bool check_bitmask(int bitmask, int flag)
+{
+    return (bitmask & flag) != 0;
+}
 
-bool is_vec2_equal(Vector2 v1, Vector2 v2);
 
+int count_bits(int x) {
+    int count = 0;
+    while (x) {
+        count += x & 1;
+        x >>= 1;
+    }
+    return count;
+}
 
+int set_bit(int bitmask, int flag)
+{
+    return bitmask | flag;
+}
+
+int clear_bit(int bitmask, int flag)
+{
+    return bitmask & ~flag;
+}
+
+int toggle_bit(int bitmask, int flag)
+{
+    return bitmask ^ flag;
+}
 
 size_t init_animation(
-    Animation* animations, 
-    thing_idx first_anim_idx_for_thing_kind, 
+    Game* game,
     Traits traits, 
-    State state, 
+    Attributes attr,
     Image img, 
     SpriteSet sprite_set,
     size_t sprite_num,
@@ -176,11 +197,12 @@ size_t init_animation(
     // one animation for each state
     // 
     // if has direction double the animations 
-    size_t total_animations = STATE_NUM;
-    size_t animation_idx = first_anim_idx_for_thing_kind + state;
+    size_t animation_idx = game->animation_num++;
     assert(animation_idx < MAX_ANIMATIONS);
-    Animation* anim = &animations[animation_idx];
+    Animation* anim = &game->animations[animation_idx];
     anim->texture = LoadTextureFromImage(img);
+    anim->kind = sprite_set.kind;
+    anim->attr = attr;
     anim->sprite_num = sprite_num;
     anim->start_offset_pixel = sprite_set.start_offset_pixel;
     anim->offset_between_stages = sprite_set.offset_between_stages;
@@ -190,28 +212,29 @@ size_t init_animation(
 
     if ((traits & HAS_DIRECTION) == HAS_DIRECTION)
     {    
-        total_animations += STATE_NUM;
-        animation_idx = animation_idx + STATE_NUM;
+        animation_idx = game->animation_num++;
         assert(animation_idx < MAX_ANIMATIONS);
-
         size_t width = anim->offset_between_stages + anim->figure_width;
-        anim = &animations[animation_idx];
+        anim = &game->animations[animation_idx];
         Image inversed_image = ImageCopy(img);
         ImageFlipHorizontal(&inversed_image);
         anim->texture = LoadTextureFromImage(inversed_image);
+        anim->kind = sprite_set.kind;
+        anim->attr = attr | LOOKS_LEFT;
         anim->sprite_num = sprite_num;
-        // anim->start_offset_pixel = sprite_set.start_offset_pixel;
         anim->start_offset_pixel = sprite_set.start_offset_pixel; 
         anim->offset_between_stages = sprite_set.offset_between_stages;
         anim->figure_width = sprite_set.figure_width;
         anim->player_position_offset = width - sprite_set.player_position_offset;
         anim->duration_frames = duration_frames;
+
         UnloadImage(inversed_image);
     }
-    return total_animations;
+    return 0;
 }
 
-size_t load_animations(Game* game, SpriteSet sprites, thing_idx animations_start_idx, Traits traits)
+
+size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
 {
     size_t num_of_animations = 0;
     for(ImageKind kind = 0; kind < IMAGE_KIND_NUM; kind++)
@@ -224,7 +247,7 @@ size_t load_animations(Game* game, SpriteSet sprites, thing_idx animations_start
         {
             case IDLE_IMAGE:
             {
-                num_of_animations = init_animation(game->animations, animations_start_idx, traits, IDLE, image, sprites, sprite.num, IDLE_DURATION_FRAMES);
+                num_of_animations = init_animation(game, traits, IDLING, image, sprites, sprite.num, IDLE_DURATION_FRAMES);
                 break;
             }   
             case ATTACK_IMAGE:
@@ -234,15 +257,15 @@ size_t load_animations(Game* game, SpriteSet sprites, thing_idx animations_start
                 ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = image.width/sprite_num, .height = image.height});
                 Image hit_image = ImageCopy(image);
                 ImageCrop(&hit_image, (Rectangle){.x = image.width/sprite_num, .y = 0, .width = ((sprite_num - 1)*image.width)/sprite_num, .height = image.height});
-                num_of_animations = init_animation(game->animations, animations_start_idx, traits, INPUT_MODE, input_image, sprites, 1, INPUT_MODE_DURATION_FRAMES);
-                num_of_animations = init_animation(game->animations, animations_start_idx, traits, HIT, hit_image, sprites, sprite.num - 1, HIT_DURATION_FRAMES);
+                num_of_animations = init_animation(game, traits, INPUTTING, input_image, sprites, 1, INPUT_MODE_DURATION_FRAMES);
+                num_of_animations = init_animation(game, traits, HITTING, hit_image, sprites, sprite.num - 1, HIT_DURATION_FRAMES);
                 UnloadImage(input_image);
                 UnloadImage(hit_image);
                 break;
             }   
             case WALK_IMAGE:
             {
-                num_of_animations = init_animation(game->animations, animations_start_idx, traits, WALK, image, sprites, sprite.num, WALK_ANIMATION_DURATION_FRAMES);
+                num_of_animations = init_animation(game, traits, MOVING, image, sprites, sprite.num, WALK_ANIMATION_DURATION_FRAMES);
                 break;
             }
             default:
@@ -258,19 +281,21 @@ size_t load_animations(Game* game, SpriteSet sprites, thing_idx animations_start
 thing_idx get_animation_idx(Game* game, thing_idx idx)
 {
     Thing* thing = &game->things[idx];
-    thing_idx anim_idx = game->animation_offsets[thing->kind] + thing->state;
-    if (((thing->traits & HAS_DIRECTION) == HAS_DIRECTION) && (!is_vec2_equal(thing->orientation, default_orientation)))
-    {
-        anim_idx += STATE_NUM; 
-    }
-    return anim_idx;
-}
 
-void set_state(Game* game, thing_idx idx, State state)
-{
-    assert(idx < MAX_THINGS);
-    game->things[idx].state = state; 
-    game->things[idx].state_cnt = 0;
+    int best_index = -1;
+    int max_overlap = -1;
+
+    for (int i = 0; i < (int)game->animation_num; i++) {
+        if (!(game->animations[i].kind == thing->kind)) continue;
+        int overlap = count_bits(game->animations[i].attr & thing->attr);
+
+        if (overlap > max_overlap) {
+            max_overlap = overlap;
+            best_index = i;
+        }
+    }
+
+    return best_index;
 }
 
 Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
@@ -347,85 +372,110 @@ void generate_hit_text(Game* game)
     }
 }
 
-void process_game_state(Game* game)
+void calc_attributes(Game* game)
 {
-    for(thing_idx i = 0; i < MAX_THINGS; i++)
+    
+    for(thing_idx i = 0; i < game->thing_num; i++)
     {
-        Thing* player = &game->things[i];
-        // PlayerState* current_state = &player->state[player->state_index];
-        // TraceLog(LOG_INFO,  "Hit strength:   %d", player->current_hit_str);
+        Thing* thing = &game->things[i];
+        if ((thing->walk_speed != 0) && (!check_bitmask(thing->attr, MOVING)))
+        {  
+            thing->attr = MOVING; 
+            state_transition(game, i);
+        }   
+        if (!Vector2Equals(thing->orientation, default_orientation))
+        {
+            thing->attr |= LOOKS_LEFT;
+        }
+    }   
+}
+
+void process_game(Game* game)
+{
+    calc_attributes(game);
+    for(thing_idx i = 0; i < game->thing_num; i++)
+    {
+        Thing* thing = &game->things[i];
+
         size_t anim_idx = get_animation_idx(game, i);
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames; 
-        switch(player->state)
+        
+        if (check_bitmask(thing->attr, INPUTTING))
         {
-            case INPUT_MODE:
+            if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
             {
-                if ((current_state_dur == player->state_cnt) && (player->damage != 0))
-                // if ((current_state_dur == player->state_cnt) )
-                {
-                    set_state(game, game->player_idx, HIT);
-                    break;
-                }
-                if (game->key_pressed == game->hit_text[player->hit_text_idx])
-                {
-                    player->damage += 1;
-                    player->hit_text_idx = (player->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
-                }
-                break;
+
+                // thing->attr = clear_bit(thing->attr, INPUTTING);
+                thing->attr = HITTING;
+                state_transition(game, i);
+                continue;
             }
-            case HIT:
+            if (game->key_pressed == game->hit_text[thing->hit_text_idx])
             {
-                if (current_state_dur == player->state_cnt)
-                {
-                    player->damage = 0;
-                }
-                break;
+                thing->damage += 1;
+                thing->hit_text_idx = (thing->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
             }
-            case WALK:
+            // return;
+            continue;
+        }
+        if (check_bitmask(thing->attr, HITTING))
+        {
+            if (current_state_dur == thing->state_cnt)
             {
-                if (is_vec2_equal(player->orientation, default_orientation))
-                {
-                    player->position.x += player->walk_speed;
-                }
-                else
-                {
-                    player->position.x -= player->walk_speed;
-                }
-                break;
+                thing->damage = 0;
+                // thing->attr = clear_bit(thing->attr, HITTING);
+                // thing->attr = set_bit(thing->attr, IDLING);
+                // state_transition(game, i);
             }
-            default:
+            continue;
+        }
+        if (check_bitmask(thing->attr, MOVING))
+        {
+            if ((thing->walk_speed == 0) && (check_bitmask(thing->attr, MOVING)))
             {
-                break;
+                thing->state_cnt = anim->duration_frames;
             }
+            // asm("int3");         
+            if (Vector2Equals(thing->orientation, default_orientation))
+            {
+                thing->position.x += thing->walk_speed;
+            }
+            else
+            {
+                thing->position.x -= thing->walk_speed;
+            }
+            continue;
         }
     }   
 }   
 
+
 void increment_game(Game* game)
 {
-    for(thing_idx i = 0; i < MAX_THINGS; i++)
+    for(int i = 0; i < game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
-         size_t anim_idx = get_animation_idx(game, i);
+        size_t anim_idx = get_animation_idx(game, i);
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
-        if (current_state_dur == thing->state_cnt) 
+        // asm("int3");         
+        if (current_state_dur <= thing->state_cnt) 
         {
-            set_state(game, i, IDLE);
-            // thing->walk_speed = 0;
+            if(thing->walk_speed == 0)
+            {
+                thing->attr = IDLING;
+                state_transition(game, i);
+            }
+            else
+            {
+                thing->attr = MOVING;
+                state_transition(game, i);
+            }
         }
-        // if (thing->walk_speed == 0)
-        // {
-        //     set_state(game, i, IDLE);
-        // }
-        if ((thing->walk_speed != 0) && (thing->state != WALK))
-        {
-            set_state(game, i, WALK);
-            // thing->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
-        }   
         thing->state_cnt++;
     }
+
 }
 
 void init_player(Game* game, thing_idx idx)
@@ -434,14 +484,14 @@ void init_player(Game* game, thing_idx idx)
     game->things[idx].position = player_position;
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
-
+    game->things[idx].attr = IDLING;
+    game->things[idx].walk_speed = 0;
     // game->things[idx].state_dur[IDLE] = IDLE_DURATION_FRAMES;
     // game->things[idx].state_dur[INPUT_MODE] = INPUT_MODE_DURATION_FRAMES;
     // game->things[idx].state_dur[HIT] = HIT_DURATION_FRAMES;
     // game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
     game->things[idx].traits = player_traits;
     game->things[idx].kind = KNIGHT;
-    set_state(game, game->player_idx, IDLE);
     game->thing_num++;
 }
 
@@ -458,7 +508,6 @@ void init_orc(Game* game, thing_idx idx)
     // game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
     game->things[idx].traits = ENEMY_TRAITS_DEFAULT;
     game->things[idx].kind = ORC;
-    set_state(game, idx, IDLE);
     game->thing_num++;
 } 
 
@@ -471,9 +520,10 @@ Game init_game()
     init_orc(&game, 1);
 
     SpriteSet knigth_set = {0};
-    knigth_set.sprites[IDLE_IMAGE].path = "assets/Knight_1/Idle.png";
-    knigth_set.sprites[ATTACK_IMAGE].path = "assets/Knight_1/Attack 3.png";
-    knigth_set.sprites[WALK_IMAGE].path = "assets/Knight_1/Walk.png";
+    knigth_set.kind = KNIGHT;
+    knigth_set.sprites[IDLE_IMAGE].path = "assets/Knight_3/Idle.png";
+    knigth_set.sprites[ATTACK_IMAGE].path = "assets/Knight_3/Attack 2.png";
+    knigth_set.sprites[WALK_IMAGE].path = "assets/Knight_3/Walk.png";
     knigth_set.sprites[IDLE_IMAGE].num = 4;
     knigth_set.sprites[ATTACK_IMAGE].num = 4;
     knigth_set.sprites[WALK_IMAGE].num = 8;
@@ -481,10 +531,10 @@ Game init_game()
     knigth_set.offset_between_stages = 64;
     knigth_set.figure_width = 64;
     knigth_set.player_position_offset = 32; 
-    size_t knight_animation_num = load_animations(&game, knigth_set, 0, player_traits);
-    game.animation_offsets[KNIGHT] = 0; 
+    size_t knight_animation_num = load_animations(&game, knigth_set, player_traits);
 
     SpriteSet orc_set = {0};
+    orc_set.kind = ORC;
     orc_set.sprites[IDLE_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
     orc_set.sprites[ATTACK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
     orc_set.sprites[WALK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
@@ -495,8 +545,7 @@ Game init_game()
     orc_set.offset_between_stages = 48;
     orc_set.figure_width = 48; 
     orc_set.player_position_offset = 48; 
-    game.animation_offsets[ORC] = knight_animation_num + 1;
-    size_t orc_animation_num = load_animations(&game, orc_set, knight_animation_num + 1, player_traits);
+    size_t orc_animation_num = load_animations(&game, orc_set, player_traits);
 
     (void)orc_animation_num;
     return game;
@@ -514,32 +563,36 @@ void draw_game(Game* game)
 void process_input(Game* game)
 {
     Thing* player = &game->things[game->player_idx];
-    if ( player->state != INPUT_MODE)
+    if (!check_bitmask(player->attr, INPUTTING))
     {
         if (game->key_pressed == 'i')
         {
-                //enter_input_mode(&game.p1);
-            if ((player->state == IDLE) || (player->state == WALK)) 
+            if ((check_bitmask(player->attr, IDLING) || (check_bitmask(player->attr, MOVING))))
             {
-                set_state(game, game->player_idx, INPUT_MODE);
-                player->walk_speed = 0;
+                player->attr = INPUTTING;
+                state_transition(game, game->player_idx);
+                return;
             }
-
         }
         if (player->walk_speed == 0)
         {
             if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)))
             {
                 // set_state(game, game->player_idx, WALK);
+                player->attr = MOVING;
                 player->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
+                // player->attr = set_bit(player->attr, MOVING);
+                state_transition(game, game->player_idx);
             } 
             if (IsKeyDown(KEY_L)) 
             {
+                player->attr = clear_bit(player->attr, LOOKS_LEFT);
                 player->orientation.x = 1;
                 player->orientation.y = 0;
             }
             if (IsKeyDown(KEY_H)) 
             {
+                player->attr = set_bit(player->attr, LOOKS_LEFT);
                 player->orientation.x = -1;
                 player->orientation.y = 0;
             }   
@@ -549,7 +602,9 @@ void process_input(Game* game)
             if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H)))
             {
                 player->walk_speed = 0;
-                set_state(game, game->player_idx, IDLE);
+                player->attr = clear_bit(player->attr, MOVING);
+                player->attr = set_bit(player->attr, IDLING);
+                state_transition(game, game->player_idx);
             }
         }
     }
@@ -575,18 +630,15 @@ void npc_ai(Game* game)
                     direction_to_player.y /= len;
                     thing->orientation = direction_to_player;
                 }
-                // asm("int3");
             }
             float dist_to_player = Vector2Distance(thing->position, player->position);
             if (dist_to_player > 64)
-            // if (!Vector2Equals(thing->position, player->position))
             {
                 thing->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME/2;
             }
             else
             {
                 thing->walk_speed = 0;
-                set_state(game, i, IDLE);
             }
         }
     }
@@ -613,14 +665,17 @@ int main(void)
         ClearBackground(RAYWHITE);
 
         int ch = GetCharPressed(); // Get pressed char for text input, using OS mapping
-        if (ch > 0) TraceLog(LOG_INFO,  "CHAR PRESSED:   %c (%d)", ch, ch);
+        // if (ch > 0) TraceLog(LOG_INFO,  "CHAR PRESSED:   %c (%d)", ch, ch);
         // print_captured_text(&game); 
         game.key_pressed = ch;
         process_input(&game);
         Thing* player = &game.things[game.player_idx];
+        size_t anim_idx = get_animation_idx(&game, game.player_idx);
+        Animation* anim  = &game.animations[anim_idx];
+        size_t current_state_dur = anim->duration_frames;
         npc_ai(&game);
-        TraceLog(LOG_DEBUG,  "STATE:  (%d) %d", player->state, player->state_cnt);
-        process_game_state(&game);
+        TraceLog(LOG_INFO,  "Attributes:  (%d) %d %ld", player->attr, player->state_cnt, current_state_dur);
+        process_game(&game);
         draw_game(&game);
         increment_game(&game);
         EndDrawing();
