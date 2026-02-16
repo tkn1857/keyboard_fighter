@@ -25,8 +25,6 @@
 #define FRAMERATE                                   60
 #define MS_PER_FRAME                                (1000/FRAMERATE)
 
-#define PLAYER_STATE_CAPACITY                       12
-
 #define HIT_DURATION_MS                             300.0f
 #define HIT_DURATION_FRAMES                         (int)((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
 #define HIT_ANIMATION_FRAMES                        3
@@ -63,6 +61,14 @@ typedef enum
     ENEMY = (1<<6),
 } Traits;
 
+typedef enum
+{
+    IDLING = (1<<0),
+    HITTING = (1<<1),
+    MOVING = (1<<2),
+    LOOKS_LEFT = (1<<3),
+} Attributes;
+
 Traits ENEMY_TRAITS_DEFAULT = ENEMY|NPC|POSITIONABLE|HAS_DIRECTION|CAN_HIT;
 Traits player_traits = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT;
 
@@ -91,18 +97,18 @@ typedef struct{
     Traits traits;
     ThingKind kind;
     thing_idx animations_start_idx;
+    Attributes attr;
     State state;
     size_t state_cnt;
     int damage;
     int health;
     Vector2 position;
     Vector2 orientation;
-    size_t state_dur[STATE_NUM];
     float walk_speed; // in percent from total stage per 1 ms
     thing_idx hit_text_idx;
     Rectangle hitbox;
     float reach; // in percent from total stage len
-    // size_t default_walk_speed;
+    size_t default_walk_speed_px;
 } Thing;
 
 typedef enum
@@ -132,11 +138,12 @@ typedef struct
 typedef struct
 {
     Texture2D texture;
-    size_t stages_num;
+    size_t sprite_num;
     size_t start_offset_pixel;
     size_t offset_between_stages;
     size_t figure_width;
     size_t player_position_offset;
+    size_t duration_frames;
 } Animation;
 
 typedef struct 
@@ -162,7 +169,8 @@ size_t init_animation(
     State state, 
     Image img, 
     SpriteSet sprite_set,
-    size_t sprite_num
+    size_t sprite_num,
+    size_t duration_frames
 )
 {
     // one animation for each state
@@ -173,11 +181,12 @@ size_t init_animation(
     assert(animation_idx < MAX_ANIMATIONS);
     Animation* anim = &animations[animation_idx];
     anim->texture = LoadTextureFromImage(img);
-    anim->stages_num = sprite_num;
+    anim->sprite_num = sprite_num;
     anim->start_offset_pixel = sprite_set.start_offset_pixel;
     anim->offset_between_stages = sprite_set.offset_between_stages;
     anim->figure_width = sprite_set.figure_width;
     anim->player_position_offset = sprite_set.player_position_offset;
+    anim->duration_frames = duration_frames;
 
     if ((traits & HAS_DIRECTION) == HAS_DIRECTION)
     {    
@@ -190,12 +199,13 @@ size_t init_animation(
         Image inversed_image = ImageCopy(img);
         ImageFlipHorizontal(&inversed_image);
         anim->texture = LoadTextureFromImage(inversed_image);
-        anim->stages_num = sprite_num;
+        anim->sprite_num = sprite_num;
         // anim->start_offset_pixel = sprite_set.start_offset_pixel;
         anim->start_offset_pixel = sprite_set.start_offset_pixel; 
         anim->offset_between_stages = sprite_set.offset_between_stages;
         anim->figure_width = sprite_set.figure_width;
         anim->player_position_offset = width - sprite_set.player_position_offset;
+        anim->duration_frames = duration_frames;
         UnloadImage(inversed_image);
     }
     return total_animations;
@@ -214,7 +224,7 @@ size_t load_animations(Game* game, SpriteSet sprites, thing_idx animations_start
         {
             case IDLE_IMAGE:
             {
-                num_of_animations = init_animation(game->animations, animations_start_idx, traits, IDLE, image, sprites, sprite.num);
+                num_of_animations = init_animation(game->animations, animations_start_idx, traits, IDLE, image, sprites, sprite.num, IDLE_DURATION_FRAMES);
                 break;
             }   
             case ATTACK_IMAGE:
@@ -224,15 +234,15 @@ size_t load_animations(Game* game, SpriteSet sprites, thing_idx animations_start
                 ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = image.width/sprite_num, .height = image.height});
                 Image hit_image = ImageCopy(image);
                 ImageCrop(&hit_image, (Rectangle){.x = image.width/sprite_num, .y = 0, .width = ((sprite_num - 1)*image.width)/sprite_num, .height = image.height});
-                num_of_animations = init_animation(game->animations, animations_start_idx, traits, INPUT_MODE, input_image, sprites, 1);
-                num_of_animations = init_animation(game->animations, animations_start_idx, traits, HIT, hit_image, sprites, sprite.num - 1);
+                num_of_animations = init_animation(game->animations, animations_start_idx, traits, INPUT_MODE, input_image, sprites, 1, INPUT_MODE_DURATION_FRAMES);
+                num_of_animations = init_animation(game->animations, animations_start_idx, traits, HIT, hit_image, sprites, sprite.num - 1, HIT_DURATION_FRAMES);
                 UnloadImage(input_image);
                 UnloadImage(hit_image);
                 break;
             }   
             case WALK_IMAGE:
             {
-                num_of_animations = init_animation(game->animations, animations_start_idx, traits, WALK, image, sprites, sprite.num);
+                num_of_animations = init_animation(game->animations, animations_start_idx, traits, WALK, image, sprites, sprite.num, WALK_ANIMATION_DURATION_FRAMES);
                 break;
             }
             default:
@@ -266,7 +276,7 @@ void set_state(Game* game, thing_idx idx, State state)
 Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
 {
     // assert(anim->stages_num - 1 >= frame_num);
-    if (frame_num > anim->stages_num - 1) frame_num = anim->stages_num - 1; // understand why this needed
+    if (frame_num > anim->sprite_num - 1) frame_num = anim->sprite_num - 1; // understand why this needed
     Rectangle frame_rect = {0};
     frame_rect.y = 0;
     frame_rect.x = anim->start_offset_pixel + frame_num * (anim->offset_between_stages + anim->figure_width);
@@ -308,31 +318,6 @@ void draw_stage()
     //DrawLine(int startPosX, int startPosY, int endPosX, int endPosY, Color color);                // Draw a line 
 }
 
-bool draw_player(Game * game)
-{
-    Thing * player = &game->things[game->player_idx];
-    thing_idx animation_idx = get_animation_idx(game, game->player_idx);
-    Animation* animation = &game->animations[animation_idx];
-    int state_duration = player->state_dur[player->state];
-    assert(state_duration != 0);
-    size_t animation_frame = ((float)player->state_cnt/(float)state_duration) * animation->stages_num;
-    Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
-
-    // TraceLog(LOG_INFO,  "Animation frame:   %ld", animation_frame);
-    //printf("%ld,%ld, %f %f \n", player->state_cnt, animation_frame,  frame_rect.x, frame_rect.y);
-    // if (player->state == HIT)
-    // {
-        // asm("int3");
-    // }
-
-    Vector2 texture_position = {.x = player->position.x - animation->player_position_offset ,  .y = player->position.y - animation->texture.height};
-    DrawTextureRec(animation->texture, frame_rect, texture_position, WHITE);
-    DrawCircle(player->position.x , player->position.y, 5, GREEN);
-    frame_rect.x = texture_position.x;
-    frame_rect.y = texture_position.y;
-    return true;
-}
-
 bool draw_things(Game * game)
 {
     for(thing_idx i = 0; i < MAX_THINGS; i++)
@@ -341,9 +326,9 @@ bool draw_things(Game * game)
         if(thing->kind == DEFAULT) continue;
         thing_idx animation_idx = get_animation_idx(game, i);
         Animation* animation = &game->animations[animation_idx];
-        int state_duration = thing->state_dur[thing->state];
+        int state_duration = animation->duration_frames;
         assert(state_duration != 0);
-        size_t animation_frame = ((float)thing->state_cnt/(float)state_duration) * animation->stages_num;
+        size_t animation_frame = ((float)thing->state_cnt/(float)state_duration) * animation->sprite_num;
         Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
         Vector2 texture_position = {.x = thing->position.x - animation->player_position_offset ,  .y = thing->position.y - animation->texture.height};
         DrawTextureRec(animation->texture, frame_rect, texture_position, WHITE);
@@ -369,7 +354,9 @@ void process_game_state(Game* game)
         Thing* player = &game->things[i];
         // PlayerState* current_state = &player->state[player->state_index];
         // TraceLog(LOG_INFO,  "Hit strength:   %d", player->current_hit_str);
-        size_t current_state_dur = player->state_dur[player->state];
+        size_t anim_idx = get_animation_idx(game, i);
+        Animation* anim  = &game->animations[anim_idx];
+        size_t current_state_dur = anim->duration_frames; 
         switch(player->state)
         {
             case INPUT_MODE:
@@ -420,7 +407,9 @@ void increment_game(Game* game)
     for(thing_idx i = 0; i < MAX_THINGS; i++)
     {
         Thing* thing = &game->things[i];
-        size_t current_state_dur = thing->state_dur[thing->state];
+         size_t anim_idx = get_animation_idx(game, i);
+        Animation* anim  = &game->animations[anim_idx];
+        size_t current_state_dur = anim->duration_frames;
         if (current_state_dur == thing->state_cnt) 
         {
             set_state(game, i, IDLE);
@@ -446,10 +435,10 @@ void init_player(Game* game, thing_idx idx)
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
 
-    game->things[idx].state_dur[IDLE] = IDLE_DURATION_FRAMES;
-    game->things[idx].state_dur[INPUT_MODE] = INPUT_MODE_DURATION_FRAMES;
-    game->things[idx].state_dur[HIT] = HIT_DURATION_FRAMES;
-    game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
+    // game->things[idx].state_dur[IDLE] = IDLE_DURATION_FRAMES;
+    // game->things[idx].state_dur[INPUT_MODE] = INPUT_MODE_DURATION_FRAMES;
+    // game->things[idx].state_dur[HIT] = HIT_DURATION_FRAMES;
+    // game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
     game->things[idx].traits = player_traits;
     game->things[idx].kind = KNIGHT;
     set_state(game, game->player_idx, IDLE);
@@ -463,10 +452,10 @@ void init_orc(Game* game, thing_idx idx)
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
 
-    game->things[idx].state_dur[IDLE] = IDLE_DURATION_FRAMES;
-    game->things[idx].state_dur[INPUT_MODE] = INPUT_MODE_DURATION_FRAMES;
-    game->things[idx].state_dur[HIT] = HIT_DURATION_FRAMES;
-    game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
+    // game->things[idx].state_dur[IDLE] = IDLE_DURATION_FRAMES;
+    // game->things[idx].state_dur[INPUT_MODE] = INPUT_MODE_DURATION_FRAMES;
+    // game->things[idx].state_dur[HIT] = HIT_DURATION_FRAMES;
+    // game->things[idx].state_dur[WALK] = WALK_ANIMATION_DURATION_FRAMES;
     game->things[idx].traits = ENEMY_TRAITS_DEFAULT;
     game->things[idx].kind = ORC;
     set_state(game, idx, IDLE);
