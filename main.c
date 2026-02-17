@@ -43,20 +43,21 @@
 #define WALK_SPEED_PERC_PER_MS                      0.02f 
 #define WALK_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*WALK_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
 
-#define NUM_COLUMNS                                 40
-#define COLUMN_CELL_WIDTH                           SCREEN_WIDTH/NUM_COLUMNS
-#define COLUMN_CELL_HEIGHT                          30
-
 typedef int thing_idx;
 
 Vector2 default_orientation = {.x = 1, .y = 0};
 const char CHARSET[] = 
-    "abcdefghijklmnopqrstuvwxyz"   // lowercase
+    // "abcdefghijklmnopqrstuvwxyz"   // lowercase
     // "ABCDEFGHIJKLMNOPQRSTUVWXYZ"   // uppercase
-    "!@#$%^&*()-_=+[]{};:,.<>/?"; // special characters
+    "ilh"   // lowercase
+    "ILH";   // uppercase
+    // "!@#$%^&*()-_=+[]{};:,.<>/?"; // special characters
 
 #define CHARSET_SIZE                                (sizeof(CHARSET)/sizeof(CHARSET[0]) - 1)
 
+#define NUM_COLUMNS                                 1 
+#define COLUMN_CELL_WIDTH                           SCREEN_WIDTH/NUM_COLUMNS
+#define COLUMN_CELL_HEIGHT                          30
 
 typedef enum
 {
@@ -597,22 +598,23 @@ void process_input(Game* game)
                 return;
             }
         }
-        if (IsKeyDown(KEY_L)) 
-        {
-            player->orientation.x = 1;
-            player->orientation.y = 0;
-        }
-        if (IsKeyDown(KEY_H)) 
-        {
-            player->orientation.x = -1;
-            player->orientation.y = 0;
-        }   
         if (player->walk_speed == 0)
         {
             if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)))
             {
                 player->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
             } 
+
+            if (IsKeyDown(KEY_L)) 
+            {
+                player->orientation.x = 1;
+                player->orientation.y = 0;
+            }
+            if (IsKeyDown(KEY_H)) 
+            {
+                player->orientation.x = -1;
+                player->orientation.y = 0;
+            }   
         }
         else
         {
