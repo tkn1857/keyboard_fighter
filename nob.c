@@ -35,6 +35,9 @@ int main(int argc, char **argv)
     cmd_append(&cmd, "cc");
     cmd_append(&cmd, "-Wall");
     cmd_append(&cmd, "-Wextra");
+    cmd_append(&cmd, "-fsanitize=undefined");
+    cmd_append(&cmd, "-fno-strict-overflow");
+    cmd_append(&cmd, "-fwrapv");
     cmd_append(&cmd, "-ggdb");
     cmd_append(&cmd, "-I./raylib-5.5_linux_amd64/include/");
     cmd_append(&cmd, "-o", "./main", "main.c");

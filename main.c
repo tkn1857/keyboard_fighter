@@ -45,13 +45,18 @@
 
 #define NUM_COLUMNS                                 40
 #define COLUMN_CELL_WIDTH                           SCREEN_WIDTH/NUM_COLUMNS
-#define COLUMN_CELL_HEIGHT                          20
+#define COLUMN_CELL_HEIGHT                          30
 
 typedef int thing_idx;
 
 Vector2 default_orientation = {.x = 1, .y = 0};
+const char CHARSET[] = 
+    "abcdefghijklmnopqrstuvwxyz"   // lowercase
+    // "ABCDEFGHIJKLMNOPQRSTUVWXYZ"   // uppercase
+    "!@#$%^&*()-_=+[]{};:,.<>/?"; // special characters
 
-size_t animation_num = 0;
+#define CHARSET_SIZE                                (sizeof(CHARSET)/sizeof(CHARSET[0]) - 1)
+
 
 typedef enum
 {
@@ -335,12 +340,18 @@ void draw_hit_text(Game* game)
 void draw_stage(Game* game)
 {
     DrawLine(0, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
-    for(thing_idx i = 0; i < game->thing_num; i++)
+    static char render_text[2];  
+    size_t font_size = COLUMN_CELL_HEIGHT - 5;
+    render_text[1] = '\0';
+    for(size_t i = 0; i < game->thing_num; i++)
     {
         
         Thing* thing = &game->things[i];
         if(thing->kind != COLUMN_CELL) continue;
+        render_text[0] = game->hit_text[thing->hit_text_idx];
+        int text_len_px = MeasureText(render_text, font_size);
         DrawRectangleLines(thing->position.x - COLUMN_CELL_WIDTH/2, STAGE_COORDINATE, COLUMN_CELL_WIDTH, COLUMN_CELL_HEIGHT, RED);
+        DrawText(render_text, thing->position.x - text_len_px/2, STAGE_COORDINATE, font_size, BLACK);
         // RLAPI void DrawRectangle(int posX, int posY, int width, int height, Color color);
     }
 }
@@ -369,9 +380,11 @@ bool draw_things(Game * game)
 
 void generate_hit_text(Game* game)
 {
+
     for(size_t i = 0; i < HIT_TEXT_CAPACITY; i++) 
     {
-       game->hit_text[i] = rand() % 25 + 97;
+       int idx = rand() % CHARSET_SIZE;
+       game->hit_text[i] = CHARSET[idx];
     }
 }
 
@@ -498,10 +511,12 @@ void init_orc(Game* game)
     game->thing_num++;
 } 
 
+
 Game init_game()
 {
     Game game = {0};
     generate_hit_text(&game);
+
     game.player_idx = 0;
     init_player(&game, game.player_idx);
     init_orc(&game) ;
@@ -534,14 +549,26 @@ Game init_game()
     orc_set.player_position_offset = 48; 
     load_animations(&game, orc_set, ENEMY_TRAITS_DEFAULT);
 
+    // generate unique characters
     int start_pos_x = COLUMN_CELL_WIDTH/2;
+    int seen[CHARSET_SIZE] = {0};
+    assert(CHARSET_SIZE >= NUM_COLUMNS);
     for (thing_idx i = 0; i < NUM_COLUMNS; i++)
     {
         Thing* thing = &game.things[game.thing_num]; 
-        // memset(thing, 
         thing->position.x = start_pos_x;
         thing->position.y = STAGE_COORDINATE;
         thing->kind = COLUMN_CELL;
+        int idx = 0;
+        do
+        {
+            idx = rand() % HIT_TEXT_CAPACITY;
+        }
+        while (seen[game.hit_text[idx]] != 0);
+
+        seen[game.hit_text[idx]] = 1;
+        thing->hit_text_idx = idx;
+
         game.thing_num++; 
         start_pos_x += COLUMN_CELL_WIDTH;
     }
@@ -656,18 +683,23 @@ int main(void)
         // print_captured_text(&game); 
         game.key_pressed = ch;
         process_input(&game);
+        npc_ai(&game);
+#if 0
         Thing* player = &game.things[game.player_idx];
         size_t anim_idx = get_animation_idx(&game, game.player_idx);
         Animation* anim  = &game.animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
-        npc_ai(&game);
         TraceLog(LOG_INFO,  "Attributes:  (%d) %d %ld", player->attr, player->state_cnt, current_state_dur);
+#endif
         process_game(&game);
         draw_game(&game);
         increment_game(&game);
         EndDrawing();
     }
-
+    for(size_t i = 0; i < game.animation_num; i++)
+    {
+        UnloadTexture(game.animations[i].texture);
+    }
     // UnloadTexture(animations[IDLE].texture);
     // UnloadTexture(animations[HIT].texture);
     // UnloadTexture(animations[INPUT_MODE].texture);
