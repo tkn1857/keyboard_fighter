@@ -424,12 +424,13 @@ void process_game(Game* game)
             {
                 thing->attr = HITTING;
                 state_transition(game, i);
-                // continue;
+                continue;
             }
             if (game->key_pressed == game->hit_text[thing->hit_text_idx])
             {
                 thing->damage += 1;
                 thing->hit_text_idx = (thing->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
+                continue;
             }
         }
         if (check_bitmask(thing->attr, HITTING))
@@ -438,7 +439,7 @@ void process_game(Game* game)
             {
                 thing->damage = 0;
             }
-            // continue;
+            continue;
         }
         if (check_bitmask(thing->attr, MOVING))
         {
@@ -455,7 +456,7 @@ void process_game(Game* game)
             {
                 thing->position.x -= thing->walk_speed;
             }
-            // continue;
+            continue;
         }
     }   
 }   
@@ -587,7 +588,8 @@ void draw_game(Game* game)
 void process_input(Game* game)
 {
     Thing* player = &game->things[game->player_idx];
-    if (!check_bitmask(player->attr, INPUTTING))
+    // make sure that hit animation and input animation is not canceled by input
+    if ((!check_bitmask(player->attr, INPUTTING)) && (!check_bitmask(player->attr, HITTING)))
     {
         if (game->key_pressed == 'i')
         {
