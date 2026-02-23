@@ -1,4 +1,4 @@
-# Fighting game
+# Beat'em Up game with Vim controls
 
 ## Quick Start
 

@@ -10,6 +10,7 @@
 #define MAX_THINGS                                  1024
 #define MAX_ANIMATIONS                              1024
 #define MAX_SPRITES                                 100
+#define MAX_SPRITES_PER_SPRITE_SHEET                24
 
 #define SCREEN_WIDTH                                800 * 1
 #define SCREEN_HEIGHT                               450 * 1
@@ -49,13 +50,14 @@ Vector2 default_orientation = {.x = 1, .y = 0};
 const char CHARSET[] = 
     // "abcdefghijklmnopqrstuvwxyz"   // lowercase
     // "ABCDEFGHIJKLMNOPQRSTUVWXYZ"   // uppercase
-    "ilh"   // lowercase
-    "ILH";   // uppercase
+    // "ilh"   // lowercase
+    "Ii";
+    // "ILH";   // uppercase
     // "!@#$%^&*()-_=+[]{};:,.<>/?"; // special characters
 
 #define CHARSET_SIZE                                (sizeof(CHARSET)/sizeof(CHARSET[0]) - 1)
 
-#define NUM_COLUMNS                                 1 
+#define NUM_COLUMNS                                 CHARSET_SIZE
 #define COLUMN_CELL_WIDTH                           SCREEN_WIDTH/NUM_COLUMNS
 #define COLUMN_CELL_HEIGHT                          30
 
@@ -89,6 +91,7 @@ typedef enum{
     DEFAULT = 0,
     KNIGHT,
     ORC,
+    YAMABUSHI,
     COLUMN_CELL,
     THING_KIND_NUM
 } ThingKind;
@@ -123,6 +126,7 @@ typedef struct
     ImageKind kind;
     const char* path;
     size_t num; 
+    int anchors[MAX_SPRITES_PER_SPRITE_SHEET];
 } Sprite;
 
 typedef struct
@@ -140,6 +144,7 @@ typedef struct
     Texture2D texture;
     Attributes attr;
     ThingKind kind;
+    int anchors[MAX_SPRITES_PER_SPRITE_SHEET];
     size_t sprite_num;
     size_t start_offset_pixel;
     size_t offset_between_stages;
@@ -198,6 +203,7 @@ size_t init_animation(
     Game* game,
     Traits traits, 
     Attributes attr,
+    ImageKind image_kind,
     Image img, 
     SpriteSet sprite_set,
     size_t sprite_num,
@@ -216,7 +222,7 @@ size_t init_animation(
     anim->figure_width = sprite_set.figure_width;
     anim->player_position_offset = sprite_set.player_position_offset;
     anim->duration_frames = duration_frames;
-
+    memcpy(anim->anchors, sprite_set.sprites[image_kind].anchors, sizeof(anim->anchors));
     if ((traits & HAS_DIRECTION) == HAS_DIRECTION)
     {    
         animation_idx = game->animation_num++;
@@ -234,6 +240,16 @@ size_t init_animation(
         anim->figure_width = sprite_set.figure_width;
         anim->player_position_offset = width - sprite_set.player_position_offset;
         anim->duration_frames = duration_frames;
+        for (size_t i = 0; i < MAX_SPRITES_PER_SPRITE_SHEET; i++)
+        {
+            int anchor = sprite_set.sprites[image_kind].anchors[i];
+            if (anchor == 0)
+            {
+                anim->anchors[i] = 0;
+                continue;
+            }
+            anim->anchors[i] = (int)inversed_image.width - anchor;
+        }
 
         UnloadImage(inversed_image);
     }
@@ -254,7 +270,7 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
         {
             case IDLE_IMAGE:
             {
-                num_of_animations = init_animation(game, traits, IDLING, image, sprites, sprite.num, IDLE_DURATION_FRAMES);
+                num_of_animations = init_animation(game, traits, IDLING, IDLE_IMAGE, image, sprites, sprite.num, IDLE_DURATION_FRAMES);
                 break;
             }   
             case ATTACK_IMAGE:
@@ -264,15 +280,15 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
                 ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = image.width/sprite_num, .height = image.height});
                 Image hit_image = ImageCopy(image);
                 ImageCrop(&hit_image, (Rectangle){.x = image.width/sprite_num, .y = 0, .width = ((sprite_num - 1)*image.width)/sprite_num, .height = image.height});
-                num_of_animations = init_animation(game, traits, INPUTTING, input_image, sprites, 1, INPUT_MODE_DURATION_FRAMES);
-                num_of_animations = init_animation(game, traits, HITTING, hit_image, sprites, sprite.num - 1, HIT_DURATION_FRAMES);
+                num_of_animations = init_animation(game, traits, INPUTTING, ATTACK_IMAGE, input_image, sprites, 1, INPUT_MODE_DURATION_FRAMES);
+                num_of_animations = init_animation(game, traits, HITTING, ATTACK_IMAGE, hit_image, sprites, sprite.num - 1, HIT_DURATION_FRAMES);
                 UnloadImage(input_image);
                 UnloadImage(hit_image);
                 break;
             }   
             case WALK_IMAGE:
             {
-                num_of_animations = init_animation(game, traits, MOVING, image, sprites, sprite.num, WALK_ANIMATION_DURATION_FRAMES);
+                num_of_animations = init_animation(game, traits, MOVING, WALK_IMAGE, image, sprites, sprite.num, WALK_ANIMATION_DURATION_FRAMES);
                 break;
             }
             default:
@@ -308,13 +324,23 @@ thing_idx get_animation_idx(Game* game, thing_idx idx)
 Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
 {
     // assert(anim->stages_num - 1 >= frame_num);
-    if (frame_num > anim->sprite_num - 1) frame_num = anim->sprite_num - 1; // understand why this needed
     Rectangle frame_rect = {0};
-    frame_rect.y = 0;
-    frame_rect.x = anim->start_offset_pixel + frame_num * (anim->offset_between_stages + anim->figure_width);
-    assert(frame_rect.x <= anim->texture.width);
-    frame_rect.width =  anim->figure_width * 2;
-    frame_rect.height = anim->texture.height;
+    if (frame_num > anim->sprite_num - 1) frame_num = anim->sprite_num - 1; // understand why this needed
+    if( anim->anchors[frame_num] == 0)
+    {
+        frame_rect.x = anim->start_offset_pixel + frame_num * (anim->offset_between_stages + anim->figure_width);
+        // assert(frame_rect.x <= anim->texture.width);
+        frame_rect.width =  anim->figure_width;
+        frame_rect.height = anim->texture.height;
+    }
+    else // use anchors instead
+    {
+        int anchor = anim->anchors[frame_num];
+        TraceLog(LOG_INFO,  "Using anchors %d", anchor);
+        frame_rect.x = anchor - anim->figure_width/2;
+        frame_rect.width =  anim->figure_width;
+        frame_rect.height = anim->texture.height;
+    }
     return frame_rect;
 }
 
@@ -370,7 +396,7 @@ bool draw_things(Game * game)
         assert(state_duration != 0);
         size_t animation_frame = ((float)thing->state_cnt/(float)state_duration) * animation->sprite_num;
         Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
-        Vector2 texture_position = {.x = thing->position.x - animation->player_position_offset ,  .y = thing->position.y - animation->texture.height};
+        Vector2 texture_position = {.x = thing->position.x - animation->figure_width/2 ,  .y = thing->position.y - animation->texture.height};
         DrawTextureRec(animation->texture, frame_rect, texture_position, WHITE);
         DrawCircle(thing->position.x , thing->position.y, 5, GREEN);
         frame_rect.x = texture_position.x;
@@ -414,7 +440,8 @@ void process_game(Game* game)
     {
         Thing* thing = &game->things[i];
 
-        size_t anim_idx = get_animation_idx(game, i);
+        int anim_idx = get_animation_idx(game, i);
+        if (anim_idx == -1) return;
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames; 
         
@@ -432,14 +459,6 @@ void process_game(Game* game)
                 thing->hit_text_idx = (thing->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
                 continue;
             }
-        }
-        if (check_bitmask(thing->attr, HITTING))
-        {
-            if (current_state_dur == thing->state_cnt)
-            {
-                thing->damage = 0;
-            }
-            continue;
         }
         if (check_bitmask(thing->attr, MOVING))
         {
@@ -467,11 +486,13 @@ void increment_game(Game* game)
     for(int i = 0; i < (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
-        size_t anim_idx = get_animation_idx(game, i);
+        int anim_idx = get_animation_idx(game, i);
+        if (anim_idx == -1) return;
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
         if (current_state_dur <= thing->state_cnt) 
         {
+            thing->damage = 0;
             if(thing->walk_speed == 0)
             {
                 thing->attr = IDLING;
@@ -482,6 +503,9 @@ void increment_game(Game* game)
                 thing->attr = MOVING;
                 state_transition(game, i);
             }
+            // Keep the first frame after a loop/state transition.
+            // Incrementing immediately here causes a visible hitch at loop boundaries.
+            continue;
         }
         thing->state_cnt++;
     }
@@ -497,7 +521,7 @@ void init_player(Game* game, thing_idx idx)
     game->things[idx].attr = IDLING;
     game->things[idx].walk_speed = 0;
     game->things[idx].traits = player_traits;
-    game->things[idx].kind = KNIGHT;
+    game->things[idx].kind = YAMABUSHI;
     game->thing_num++;
 }
 
@@ -514,6 +538,18 @@ void init_orc(Game* game)
 } 
 
 
+void init_knight_enemy(Game* game)
+{
+    Vector2 position = {1 * SCREEN_WIDTH/4, STAGE_COORDINATE};
+    thing_idx idx = game->thing_num;
+    game->things[idx].position = position;
+    game->things[idx].orientation.x = 1;
+    game->things[idx].orientation.y = 0;
+    game->things[idx].traits = ENEMY_TRAITS_DEFAULT;
+    game->things[idx].kind = KNIGHT;
+    game->thing_num++;
+}
+
 Game init_game()
 {
     Game game = {0};
@@ -521,8 +557,10 @@ Game init_game()
 
     game.player_idx = 0;
     init_player(&game, game.player_idx);
-    init_orc(&game) ;
+    init_orc(&game);
+    init_knight_enemy(&game); 
 
+   
     SpriteSet knigth_set = {0};
     knigth_set.kind = KNIGHT;
     knigth_set.sprites[IDLE_IMAGE].path = "assets/Knight_3/Idle.png";
@@ -537,23 +575,47 @@ Game init_game()
     knigth_set.player_position_offset = 32; 
     load_animations(&game, knigth_set, player_traits);
 
-    SpriteSet orc_set = {0};
-    orc_set.kind = ORC;
-    orc_set.sprites[IDLE_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
-    orc_set.sprites[ATTACK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
-    orc_set.sprites[WALK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
-    orc_set.sprites[IDLE_IMAGE].num = 5;
-    orc_set.sprites[ATTACK_IMAGE].num = 4;
-    orc_set.sprites[WALK_IMAGE].num = 7;
-    orc_set.start_offset_pixel = 0;
-    orc_set.offset_between_stages = 48;
-    orc_set.figure_width = 48; 
-    orc_set.player_position_offset = 48; 
-    load_animations(&game, orc_set, ENEMY_TRAITS_DEFAULT);
+    {
+        SpriteSet set = {0};
+        set.kind = ORC;
+        set.sprites[IDLE_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
+        set.sprites[ATTACK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
+        set.sprites[WALK_IMAGE].path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
+        set.sprites[IDLE_IMAGE].num = 5;
+        set.sprites[ATTACK_IMAGE].num = 4;
+        set.sprites[WALK_IMAGE].num = 7;
+        set.start_offset_pixel = 0;
+        set.offset_between_stages = 48;
+        set.figure_width = 96; 
+        set.player_position_offset = 48; 
 
+        int IDLE_ANCHORS[] = {48, 144, 240, 336, 432};  
+        assert(sizeof(IDLE_ANCHORS)/sizeof(IDLE_ANCHORS[0]) == set.sprites[IDLE_IMAGE].num);
+        memcpy(set.sprites[IDLE_IMAGE].anchors, IDLE_ANCHORS, sizeof(IDLE_ANCHORS));
+        load_animations(&game, set, player_traits);
+    }
+    { 
+        SpriteSet set = {0};
+        set.kind = YAMABUSHI;
+        set.sprites[IDLE_IMAGE].path = "assets/Yamabushi/Idle.png";
+        set.sprites[ATTACK_IMAGE].path = "assets/Yamabushi/Attack_1.png";
+        set.sprites[WALK_IMAGE].path = "assets/Yamabushi/Walk.png";
+        set.sprites[IDLE_IMAGE].num = 6;
+        set.sprites[ATTACK_IMAGE].num = 3;
+        set.sprites[WALK_IMAGE].num = 8;
+        set.start_offset_pixel = 16;
+        set.offset_between_stages = 48;
+        set.figure_width = 100; 
+        set.player_position_offset = 0; 
+
+        int IDLE_ANCHORS[] = {68, 200, 324, 452, 580, 708};  
+        assert(sizeof(IDLE_ANCHORS)/sizeof(IDLE_ANCHORS[0]) == set.sprites[IDLE_IMAGE].num);
+        memcpy(set.sprites[IDLE_IMAGE].anchors, IDLE_ANCHORS, sizeof(IDLE_ANCHORS));
+        load_animations(&game, set, player_traits);
+    }
     // generate unique characters
     int start_pos_x = COLUMN_CELL_WIDTH/2;
-    int seen[CHARSET_SIZE] = {0};
+    int seen[256] = {0};
     assert(CHARSET_SIZE >= NUM_COLUMNS);
     for (thing_idx i = 0; i < NUM_COLUMNS; i++)
     {
@@ -566,9 +628,9 @@ Game init_game()
         {
             idx = rand() % HIT_TEXT_CAPACITY;
         }
-        while (seen[game.hit_text[idx]] != 0);
+        while (seen[(unsigned char)game.hit_text[idx]] != 0);
 
-        seen[game.hit_text[idx]] = 1;
+        seen[(unsigned char)game.hit_text[idx]] = 1;
         thing->hit_text_idx = idx;
 
         game.thing_num++; 
@@ -589,41 +651,39 @@ void process_input(Game* game)
 {
     Thing* player = &game->things[game->player_idx];
     // make sure that hit animation and input animation is not canceled by input
-    if ((!check_bitmask(player->attr, INPUTTING)) && (!check_bitmask(player->attr, HITTING)))
+    if ((check_bitmask(player->attr, INPUTTING)) || (check_bitmask(player->attr, HITTING))) return;
+    if (game->key_pressed == 'i')
     {
-        if (game->key_pressed == 'i')
+        if ((check_bitmask(player->attr, IDLING) || (check_bitmask(player->attr, MOVING))))
         {
-            if ((check_bitmask(player->attr, IDLING) || (check_bitmask(player->attr, MOVING))))
-            {
-                player->attr = INPUTTING;
-                state_transition(game, game->player_idx);
-                return;
-            }
+            player->attr = INPUTTING;
+            state_transition(game, game->player_idx);
+            return;
         }
-        if (player->walk_speed == 0)
+    }
+    if (player->walk_speed == 0)
+    {
+        if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)))
         {
-            if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)))
-            {
-                player->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
-            } 
+            player->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
+        } 
 
-            if (IsKeyDown(KEY_L)) 
-            {
-                player->orientation.x = 1;
-                player->orientation.y = 0;
-            }
-            if (IsKeyDown(KEY_H)) 
-            {
-                player->orientation.x = -1;
-                player->orientation.y = 0;
-            }   
-        }
-        else
+        if (IsKeyDown(KEY_L)) 
         {
-            if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H)))
-            {
-                player->walk_speed = 0;
-            }
+            player->orientation.x = 1;
+            player->orientation.y = 0;
+        }
+        if (IsKeyDown(KEY_H)) 
+        {
+            player->orientation.x = -1;
+            player->orientation.y = 0;
+        }   
+    }
+    else
+    {
+        if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H)))
+        {
+            player->walk_speed = 0;
         }
     }
 }
@@ -688,7 +748,7 @@ int main(void)
         game.key_pressed = ch;
         process_input(&game);
         npc_ai(&game);
-#if 0
+#if 0 
         Thing* player = &game.things[game.player_idx];
         size_t anim_idx = get_animation_idx(&game, game.player_idx);
         Animation* anim  = &game.animations[anim_idx];
