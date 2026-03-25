@@ -14,6 +14,7 @@
 
 #define SCREEN_WIDTH                                800 * 1
 #define SCREEN_HEIGHT                               450 * 1
+#define DEFAULT_THING_TEX_HEIGHT		    SCREEN_HEIGHT*0.19 	 
 
 #define HIT_TEXT_POSITION_Y                         SCREEN_HEIGHT*0.2
 #define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
@@ -213,6 +214,8 @@ size_t init_animation(
     size_t animation_idx = game->animation_num++;
     assert(animation_idx < MAX_ANIMATIONS);
     Animation* anim = &game->animations[animation_idx];
+    // RLAPI void ImageResize(Image *image, int newWidth, int newHeight);                                       // Resize image (Bicubic scaling algorithm)
+	 
     anim->texture = LoadTextureFromImage(img);
     anim->kind = sprite_set.kind;
     anim->attr = attr;
@@ -568,7 +571,6 @@ Game init_game()
     knigth_set.sprites[WALK_IMAGE].num = 8;
     knigth_set.figure_width = 64;
     load_animations(&game, knigth_set, player_traits);
-
     {
         SpriteSet set = {0};
         set.kind = ORC;
@@ -605,7 +607,7 @@ Game init_game()
     int start_pos_x = COLUMN_CELL_WIDTH/2;
     int seen[256] = {0};
     assert(CHARSET_SIZE >= NUM_COLUMNS);
-    for (thing_idx i = 0; i < NUM_COLUMNS; i++)
+    for (thing_idx i = 0; i < (thing_idx)NUM_COLUMNS; i++)
     {
         Thing* thing = &game.things[game.thing_num]; 
         thing->position.x = start_pos_x;
@@ -633,7 +635,6 @@ void draw_game(Game* game)
     draw_hit_text(game);
     draw_things(game);
 }
-
 
 void process_input(Game* game)
 {
