@@ -14,7 +14,7 @@
 
 #define SCREEN_WIDTH                                800 * 1
 #define SCREEN_HEIGHT                               450 * 1
-#define DEFAULT_THING_TEX_HEIGHT		    SCREEN_HEIGHT*0.19 	 
+#define DEFAULT_THING_TEX_HEIGHT		            SCREEN_HEIGHT*0.19 	 
 
 #define HIT_TEXT_POSITION_Y                         SCREEN_HEIGHT*0.2
 #define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
@@ -61,6 +61,8 @@ const char CHARSET[] =
     "Ii";
     // "ILH";   // uppercase
     // "!@#$%^&*()-_=+[]{};:,.<>/?"; // special characters
+
+
 
 #define CHARSET_SIZE                                (sizeof(CHARSET)/sizeof(CHARSET[0]) - 1)
 
@@ -336,7 +338,7 @@ Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
     if (frame_num > anim->sprite_num - 1) frame_num = anim->sprite_num - 1; // understand why this needed
     {
         int anchor = anim->anchors[frame_num];
-        TraceLog(LOG_INFO,  "Using anchors %d", anchor);
+        // TraceLog(LOG_INFO,  "Using anchors %d", anchor);
         frame_rect.x = anchor - anim->figure_width/2;
         frame_rect.width =  anim->figure_width;
         frame_rect.height = anim->texture.height;
@@ -717,9 +719,7 @@ int main(void)
     srand(time(0));
     int framesCounter = 0;
 
-    const int screenWidth = SCREEN_WIDTH;
-    const int screenHeight = SCREEN_HEIGHT;
-    InitWindow(screenWidth, screenHeight, "Keyboard Fighter");
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Keyboard Fighter");
     Game game = init_game();
     SetTargetFPS(FRAMERATE);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
