@@ -14,7 +14,7 @@
 
 #define SCREEN_WIDTH                                800 * 1
 #define SCREEN_HEIGHT                               450 * 1
-#define DEFAULT_THING_TEX_HEIGHT		            SCREEN_HEIGHT*0.19 	 
+#define DEFAULT_THING_TEX_HEIGHT		            SCREEN_HEIGHT*0.18 	 
 
 #define HIT_TEXT_POSITION_Y                         SCREEN_HEIGHT*0.2
 #define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
@@ -241,9 +241,10 @@ size_t sprite_to_animation(
     Image* img = &sprite->image;
 
     size_t frames_num = 0;
+    size_t animation_frame_idx = 0;
     for(size_t anchor_index = 0; anchor_index < anchors_num; anchor_index++)
     {
-        if (!use_anchor[anchor_index]) continue;
+        if (use_anchor[anchor_index] == false) continue;
         else frames_num++;
 
         Image cropped_image = ImageCopy(*img);
@@ -254,19 +255,22 @@ size_t sprite_to_animation(
         assert(anchor != 0);
         Rectangle crop_rect = {.height = img->height, .width = width, .x = anchor - width/2, .y = 0}; 
         ImageCrop(&cropped_image, crop_rect);
-        float resize_coef = (float)DEFAULT_THING_TEX_HEIGHT/ img->height;   
-        int new_width = resize_coef * img->width;
-        int new_height = resize_coef * img->height;
+        float resize_coef = (float)DEFAULT_THING_TEX_HEIGHT/cropped_image.height;   
+        // float resize_coef = 0.5;   
+        int new_width = resize_coef * (float) cropped_image.width;
+        int new_height = resize_coef * (float) cropped_image.height;
+        // asm("int3");
         ImageResize(&cropped_image, new_width, new_height);                                       
 
-        anim->textures[anchor_index] = LoadTextureFromImage(*img);
+        anim->textures[animation_frame_idx] = LoadTextureFromImage(cropped_image);
         if ((traits & HAS_DIRECTION) == HAS_DIRECTION)
         {    
             Image inversed_image = ImageCopy(cropped_image);
             ImageFlipHorizontal(&inversed_image);
-            inversed_anim->textures[anchor_index]= LoadTextureFromImage(inversed_image);
+            inversed_anim->textures[animation_frame_idx]= LoadTextureFromImage(inversed_image);
             UnloadImage(inversed_image);
         }
+        animation_frame_idx++;
     }
     assert(frames_num != 0);
     anim->sprite_num = frames_num;
@@ -284,6 +288,7 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
     {
         Sprite sprite = sprites.sprites[kind]; 
         Image image = LoadImage(sprites.sprites[kind].image_path);
+        sprites.sprites[kind].image = image;
         assert(sprite.frame_num != 0);
 
         switch(kind)
@@ -295,17 +300,13 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
             }   
             case ATTACK_IMAGE:
             {
-                size_t sprite_num = sprite.frame_num;
-                Image input_image = ImageCopy(image);
-                ImageCrop(&input_image, (Rectangle){.x = 0, .y = 0, .width = image.width/sprite_num, .height = image.height});
-                Image hit_image = ImageCopy(image);
-                ImageCrop(&hit_image, (Rectangle){.x = image.width/sprite_num, .y = 0, .width = ((sprite_num - 1)*image.width)/sprite_num, .height = image.height});
-                int* anchors = sprites.sprites[ATTACK_IMAGE].anchors;
+
+                for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = false;}
+                use_anchors[0] = true;
                 num_of_animations = sprite_to_animation(game, traits, INPUTTING, sprites, ATTACK_IMAGE, INPUT_MODE_DURATION_FRAMES, use_anchors);
-                anchors++;
+                for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = true;}
+                use_anchors[0] = false;
                 num_of_animations = sprite_to_animation(game, traits, HITTING, sprites, ATTACK_IMAGE, HIT_DURATION_FRAMES, use_anchors);
-                UnloadImage(input_image);
-                UnloadImage(hit_image);
                 break;
             }   
             case WALK_IMAGE:
