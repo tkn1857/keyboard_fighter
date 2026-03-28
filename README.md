@@ -23,3 +23,6 @@ $ ./nob -run
 - [ ] Tests
 - [ ] Jump
 - [ ] Crouch
+
+## Todo
+- add widths for all sprite set. Default approach makes hit animation to be cropped.

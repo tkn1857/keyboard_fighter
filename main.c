@@ -288,6 +288,7 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
     {
         Sprite sprite = sprites.sprites[kind]; 
         Image image = LoadImage(sprites.sprites[kind].image_path);
+        assert(image.width != 0);
         sprites.sprites[kind].image = image;
         assert(sprite.frame_num != 0);
         for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = true;}
@@ -593,7 +594,7 @@ Game init_game()
         SpriteSet set = {0};
         set.kind = ORC;
         set.sprites[IDLE_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
-        set.sprites[ATTACK_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Attack_0.png";
+        set.sprites[ATTACK_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
         set.sprites[WALK_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
         set.sprites[IDLE_IMAGE].frame_num = 5;
         set.sprites[ATTACK_IMAGE].frame_num = 4;
@@ -609,7 +610,7 @@ Game init_game()
         SpriteSet set = {0};
         set.kind = YAMABUSHI;
         set.sprites[IDLE_IMAGE].image_path = "assets/Yamabushi/Idle.png";
-        set.sprites[ATTACK_IMAGE].image_path = "assets/Yamabushi/Attack_0.png";
+        set.sprites[ATTACK_IMAGE].image_path = "assets/Yamabushi/Attack_1.png";
         set.sprites[WALK_IMAGE].image_path = "assets/Yamabushi/Walk.png";
         set.sprites[IDLE_IMAGE].frame_num = 6;
         set.sprites[ATTACK_IMAGE].frame_num = 3;
