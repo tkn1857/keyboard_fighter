@@ -14,7 +14,7 @@
 
 #define SCREEN_WIDTH                                800 * 1
 #define SCREEN_HEIGHT                               450 * 1
-#define DEFAULT_THING_TEX_HEIGHT		            SCREEN_HEIGHT*0.18 	 
+#define DEFAULT_THING_TEX_HEIGHT		            SCREEN_HEIGHT*0.199 	 
 
 #define HIT_TEXT_POSITION_Y                         SCREEN_HEIGHT*0.2
 #define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
@@ -259,9 +259,9 @@ size_t sprite_to_animation(
         // float resize_coef = 0.5;   
         int new_width = resize_coef * (float) cropped_image.width;
         int new_height = resize_coef * (float) cropped_image.height;
+        ImageResize(&cropped_image, new_width, new_height); 
+        // ExportImage(cropped_image, "test.png"); 
         // asm("int3");
-        ImageResize(&cropped_image, new_width, new_height);                                       
-
         anim->textures[animation_frame_idx] = LoadTextureFromImage(cropped_image);
         if ((traits & HAS_DIRECTION) == HAS_DIRECTION)
         {    
@@ -290,6 +290,7 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
         Image image = LoadImage(sprites.sprites[kind].image_path);
         sprites.sprites[kind].image = image;
         assert(sprite.frame_num != 0);
+        for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = true;}
 
         switch(kind)
         {
@@ -407,10 +408,10 @@ bool draw_things(Game * game)
         Animation* animation = &game->animations[animation_idx];
         int state_duration = animation->duration_frames;
         assert(state_duration != 0);
-        size_t animation_frame = ((float)thing->state_cnt/(float)state_duration) * animation->sprite_num;
-        // Rectangle frame_rect = get_rect_from_animation(animation, animation_frame);
+        size_t animation_frame = (size_t)(((float)thing->state_cnt/(float)state_duration) * (float)animation->sprite_num);
+        if (animation_frame >= animation->sprite_num) animation_frame = animation->sprite_num - 1;
         Texture2D* texture = &animation->textures[animation_frame];
-         
+        if (texture->id == 0) continue;
         Vector2 texture_position = {.x = thing->position.x - texture->width/2 ,.y = thing->position.y - texture->height};
 
         DrawTextureV(*texture, texture_position, WHITE);
