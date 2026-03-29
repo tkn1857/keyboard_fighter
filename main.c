@@ -44,6 +44,14 @@
 #define WALK_ANIMATION_DURATION_FRAMES              (int)((int)WALK_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
 #define WALK_SPEED_PERC_PER_MS                      0.02f 
 #define WALK_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*WALK_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
+
+#define FLY_ANIMATION_FRAMES                       8
+#define FLY_ANIMATION_DURATION_MS                  500 
+#define FLY_ANIMATION_DURATION_FRAMES              (int)((int)FLY_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
+#define FLY_SPEED_PERC_PER_MS                      0.02f 
+#define FLY_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*FLY_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
+
+
 #define ADD_ANCHORS(sprite_set, IMAGE_KIND, ...) \
     do { \
         int _anchors_[] = {__VA_ARGS__}; \
@@ -79,6 +87,7 @@ typedef enum
     CAN_HIT = (1<<4),
     NPC = (1<<5),
     ENEMY = (1<<6),
+    CAN_FLY = (1<<7),
 } Traits;
 
 typedef enum
@@ -90,10 +99,12 @@ typedef enum
     INPUTTING = (1<<4),
     MOVING_FAST = (1<<5),
     INPUT_MOVE = (1<<6),
+    FLYING = (1<<7),
+    // TAKING_OFF = (1<<7),
 } Attributes;
 
 Traits ENEMY_TRAITS_DEFAULT = ENEMY|NPC|POSITIONABLE|HAS_DIRECTION|CAN_HIT;
-Traits player_traits = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT;
+Traits PLAYER_TRAITS = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT | CAN_FLY;
 
 
 typedef enum{
@@ -114,12 +125,12 @@ typedef struct{
     int health;
     Vector2 position;
     Vector2 orientation;
-    float walk_speed;
+    float movement_speed;
     thing_idx hit_text_idx;
     size_t hit_text_size;
     Rectangle hitbox;
     float reach; // in percent from total stage len
-    size_t default_walk_speed_px;
+    size_t default_movement_speed_px;
 } Thing;
 
 typedef enum
@@ -127,6 +138,7 @@ typedef enum
     IDLE_IMAGE,
     ATTACK_IMAGE,
     WALK_IMAGE,
+    JUMP_IMAGE,
     IMAGE_KIND_NUM
 } ImageKind;   
 
@@ -287,6 +299,7 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
     for(ImageKind kind = 0; kind < IMAGE_KIND_NUM; kind++)
     {
         Sprite sprite = sprites.sprites[kind]; 
+        if (sprites.sprites[kind].image_path == NULL) continue;
         Image image = LoadImage(sprites.sprites[kind].image_path);
         assert(image.width != 0);
         sprites.sprites[kind].image = image;
@@ -314,6 +327,20 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
             case WALK_IMAGE:
             {
                 num_of_animations = sprite_to_animation(game, traits, MOVING, sprites, WALK_IMAGE, WALK_ANIMATION_DURATION_FRAMES, use_anchors);
+                break;
+            }
+            case JUMP_IMAGE:
+            {
+                for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = false;}
+                for(int i = 5;i <= 10; i++) {use_anchors[i] = true;}
+                num_of_animations = sprite_to_animation(
+                        game,
+                        traits,
+                        FLYING | IDLING | MOVING,
+                        sprites,
+                        JUMP_IMAGE,
+                        FLY_ANIMATION_DURATION_FRAMES,
+                        use_anchors);
                 break;
             }
             default:
@@ -387,7 +414,7 @@ void draw_stage(Game* game)
     render_text[1] = '\0';
     for(size_t i = 0; i < game->thing_num; i++)
     {
-        
+
         Thing* thing = &game->things[i];
         if(thing->kind != COLUMN_CELL) continue;
         render_text[0] = game->hit_text[thing->hit_text_idx];
@@ -433,11 +460,10 @@ void generate_hit_text(Game* game)
 
 void calc_attributes(Game* game)
 {
-    
     for(thing_idx i = 0; i < (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
-        if ((thing->walk_speed != 0) && (!check_bitmask(thing->attr, MOVING)))
+        if ((thing->movement_speed != 0) && (!check_bitmask(thing->attr, MOVING)))
         {  
             thing->attr = MOVING; 
             state_transition(game, i);
@@ -445,6 +471,10 @@ void calc_attributes(Game* game)
         if (!Vector2Equals(thing->orientation, default_orientation))
         {
             thing->attr |= LOOKS_LEFT;
+        }
+        if (thing->position.y < STAGE_COORDINATE)
+        {
+            thing->attr |= FLYING;
         }
     }   
 }
@@ -455,7 +485,6 @@ void process_game(Game* game)
     for(thing_idx i = 0; i < (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
-
         int anim_idx = get_animation_idx(game, i);
         if (anim_idx == -1) return;
         Animation* anim  = &game->animations[anim_idx];
@@ -479,18 +508,22 @@ void process_game(Game* game)
         if (check_bitmask(thing->attr, MOVING))
         {
             // needed to stop immidiately after after walk speed is 0
-            if ((thing->walk_speed == 0) && (check_bitmask(thing->attr, MOVING)))
+            if ((thing->movement_speed == 0) && (check_bitmask(thing->attr, MOVING)))
             {
                 thing->state_cnt = anim->duration_frames;
             }
-            if (Vector2Equals(thing->orientation, default_orientation))
-            {
-                thing->position.x += thing->walk_speed;
-            }
-            else
-            {
-                thing->position.x -= thing->walk_speed;
-            }
+
+            thing->position.x += thing->movement_speed * thing->orientation.x;
+            thing->position.y += thing->movement_speed * thing->orientation.y;
+            if(thing->position.y >= STAGE_COORDINATE) thing->position.y = STAGE_COORDINATE;
+            // if (Vector2Equals(thing->orientation, default_orientation))
+            // {
+            //     thing->position.x += thing->movement_speed;
+            // }
+            // else
+            // {
+            //     thing->position.x -= thing->movement_speed;
+            // }
             continue;
         }
     }   
@@ -509,7 +542,7 @@ void increment_game(Game* game)
         if (current_state_dur <= thing->state_cnt) 
         {
             thing->damage = 0;
-            if(thing->walk_speed == 0)
+            if(thing->movement_speed == 0)
             {
                 thing->attr = IDLING;
                 state_transition(game, i);
@@ -535,8 +568,8 @@ void init_player(Game* game, thing_idx idx)
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
     game->things[idx].attr = IDLING;
-    game->things[idx].walk_speed = 0;
-    game->things[idx].traits = player_traits;
+    game->things[idx].movement_speed = 0;
+    game->things[idx].traits = PLAYER_TRAITS;
     game->things[idx].kind = YAMABUSHI;
     game->thing_num++;
 }
@@ -556,7 +589,7 @@ void init_orc(Game* game)
 
 void init_knight_enemy(Game* game)
 {
-    Vector2 position = {1 * SCREEN_WIDTH/4, STAGE_COORDINATE};
+    Vector2 position = {SCREEN_WIDTH/4, STAGE_COORDINATE};
     thing_idx idx = game->thing_num;
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
@@ -589,7 +622,7 @@ Game init_game()
     ADD_ANCHORS(knigth_set, IDLE_IMAGE, 64, 192, 320, 448);
     ADD_ANCHORS(knigth_set, WALK_IMAGE, 64, 192, 320, 448, 576, 704, 832, 960);
     ADD_ANCHORS(knigth_set, ATTACK_IMAGE, 64, 192, 320, 448);
-    load_animations(&game, knigth_set, player_traits);
+    load_animations(&game, knigth_set, PLAYER_TRAITS);
     {
         SpriteSet set = {0};
         set.kind = ORC;
@@ -604,7 +637,7 @@ Game init_game()
         ADD_ANCHORS(set, IDLE_IMAGE, 48, 144, 240, 336, 432);
         ADD_ANCHORS(set, WALK_IMAGE, 48, 144, 240, 336, 432, 528, 624);
         ADD_ANCHORS(set, ATTACK_IMAGE, 45, 140, 245, 341);
-        load_animations(&game, set, player_traits);
+        load_animations(&game, set, PLAYER_TRAITS);
     }
     { 
         SpriteSet set = {0};
@@ -612,15 +645,22 @@ Game init_game()
         set.sprites[IDLE_IMAGE].image_path = "assets/Yamabushi/Idle.png";
         set.sprites[ATTACK_IMAGE].image_path = "assets/Yamabushi/Attack_1.png";
         set.sprites[WALK_IMAGE].image_path = "assets/Yamabushi/Walk.png";
+        set.sprites[JUMP_IMAGE].image_path = "assets/Yamabushi/Jump.png";
         set.sprites[IDLE_IMAGE].frame_num = 6;
         set.sprites[ATTACK_IMAGE].frame_num = 3;
         set.sprites[WALK_IMAGE].frame_num = 8;
+        set.sprites[JUMP_IMAGE].frame_num = 15;
         set.figure_width = 100; 
 
         ADD_ANCHORS(set, IDLE_IMAGE, 68, 200, 324, 452, 580, 708);
         ADD_ANCHORS(set, WALK_IMAGE, 64, 192, 320, 448, 576, 704, 832, 960);
         ADD_ANCHORS(set, ATTACK_IMAGE, 55, 189, 313);
-        load_animations(&game, set, player_traits);
+        ADD_ANCHORS(set, JUMP_IMAGE, 64, 192, 320, 448, 576, 704, 832, 960, 1088, 1216, 1344, 1472, 1600, 1728, 1856);
+        for (size_t i = 0; i < set.sprites[JUMP_IMAGE].frame_num; i++)
+        {
+            set.sprites[JUMP_IMAGE].widths[i] = (int)set.figure_width;
+        }
+        load_animations(&game, set, PLAYER_TRAITS);
     }
     // generate unique characters
     int start_pos_x = COLUMN_CELL_WIDTH/2;
@@ -670,11 +710,11 @@ void process_input(Game* game)
             return;
         }
     }
-    if (player->walk_speed == 0)
+    if (player->movement_speed == 0)
     {
-        if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)))
+        if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)|| IsKeyDown(KEY_K) || IsKeyDown(KEY_J)))
         {
-            player->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
+            player->movement_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
         } 
 
         if (IsKeyDown(KEY_L)) 
@@ -686,13 +726,23 @@ void process_input(Game* game)
         {
             player->orientation.x = -1;
             player->orientation.y = 0;
+        }
+        if (IsKeyDown(KEY_K)) 
+        {
+            player->orientation.x = 0;
+            player->orientation.y = -1;
         }   
+        if (IsKeyDown(KEY_J)) 
+        {
+            player->orientation.x = 0;
+            player->orientation.y = 1;
+        }
     }
     else
     {
-        if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H)))
+        if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H) && !IsKeyDown(KEY_K) && !IsKeyDown(KEY_J)))
         {
-            player->walk_speed = 0;
+            player->movement_speed = 0;
         }
     }
 }
@@ -716,16 +766,18 @@ void npc_ai(Game* game)
                     direction_to_player.x /= len;
                     direction_to_player.y /= len;
                     thing->orientation = direction_to_player;
+                    if ((thing->traits & CAN_FLY) != CAN_FLY) thing->orientation.y = 0;
+                    thing->orientation = Vector2Normalize(thing->orientation);
                 }
             }
             float dist_to_player = Vector2Distance(thing->position, player->position);
             if (dist_to_player > 64)
             {
-                thing->walk_speed = WALK_INCREMENT_PIXEL_PER_FRAME/2;
+                thing->movement_speed = WALK_INCREMENT_PIXEL_PER_FRAME/2;
             }
             else
             {
-                thing->walk_speed = 0;
+                thing->movement_speed = 0;
             }
         }
     }
@@ -748,7 +800,7 @@ int main(void)
         ClearBackground(RAYWHITE);
         int ch = GetCharPressed(); // Get pressed char for text input, using OS mapping
         // if (ch > 0) TraceLog(LOG_INFO,  "CHAR PRESSED:   %c (%d)", ch, ch);
-        // print_captured_text(&game); 
+        // print_capthing->orientation = tured_text(&game); 
         game.key_pressed = ch;
         process_input(&game);
         npc_ai(&game);
