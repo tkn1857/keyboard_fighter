@@ -12,15 +12,26 @@
 #define MAX_SPRITES                                 100
 #define MAX_SPRITES_PER_SPRITE_SHEET                24
 
-#define SCREEN_WIDTH                                800 * 1
-#define SCREEN_HEIGHT                               450 * 1
-#define DEFAULT_THING_TEX_HEIGHT		            SCREEN_HEIGHT*0.199 	 
+#define SCREEN_WIDTH                                1024 * 1
+#define SCREEN_HEIGHT                               1024 * 1
+#define LINE_NUMBER_OFFSET                          (int)(SCREEN_WIDTH*0.1)
+
+// #define GRID_Y                                      SCREEN_HEIGHT/DEFAULT_THING_TEX_HEIGHT
+
+#define GRID_Y                                      8 
+#define GRID_X                                      30 
+
+#define CELL_HEIGHT                                 (int)(SCREEN_HEIGHT/GRID_Y)  
+#define CELL_WIDTH                                  (int)(SCREEN_WIDTH/GRID_X)
+#define GRID_TRANSPARENCY                           100
+
+#define DEFAULT_THING_TEX_HEIGHT		            (int)(CELL_HEIGHT * 0.7)
 
 #define HIT_TEXT_POSITION_Y                         SCREEN_HEIGHT*0.2
 #define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
 #define HIT_TEXT_CAPACITY                           500
 
-#define STAGE_COORDINATE                            SCREEN_HEIGHT*0.9 
+#define STAGE_COORDINATE                            CELL_HEIGHT * (GRID_Y - 2)
 
 #define GOOD_CPM                                    300
 
@@ -63,10 +74,10 @@ typedef int thing_idx;
 
 Vector2 default_orientation = {.x = 1, .y = 0};
 const char CHARSET[] = 
-    // "abcdefghijklmnopqrstuvwxyz"   // lowercase
+    "abcdefghijklmnopqrstuvwxyz";   // lowercase
     // "ABCDEFGHIJKLMNOPQRSTUVWXYZ"   // uppercase
     // "ilh"   // lowercase
-    "Ii";
+    // "Ii";
     // "ILH";   // uppercase
     // "!@#$%^&*()-_=+[]{};:,.<>/?"; // special characters
 
@@ -112,7 +123,7 @@ typedef enum{
     KNIGHT,
     ORC,
     YAMABUSHI,
-    COLUMN_CELL,
+    GRID_CELL,
     THING_KIND_NUM
 } ThingKind;
 
@@ -131,6 +142,7 @@ typedef struct{
     Rectangle hitbox;
     float reach; // in percent from total stage len
     size_t default_movement_speed_px;
+    float height; // in percent from CELL_HEIGHT
 } Thing;
 
 typedef enum
@@ -156,6 +168,7 @@ typedef struct
     Sprite sprites[IMAGE_KIND_NUM];
     ThingKind kind;
     size_t figure_width; 
+    size_t figure_height;
 } SpriteSet;
 
 typedef struct
@@ -173,6 +186,8 @@ typedef struct
     Animation animations[MAX_ANIMATIONS];
     char hit_text[HIT_TEXT_CAPACITY];
     char key_pressed;
+    int recorded_num;
+    char input[HIT_TEXT_CAPACITY];
     thing_idx player_idx;
     size_t thing_num;
     size_t animation_num;
@@ -182,12 +197,12 @@ void state_transition(Game* game, thing_idx idx)
 {
     Thing* thing = &game->things[idx];
     thing->state_cnt = 0;
+    game->recorded_num = 0;
 }
 bool check_bitmask(int bitmask, int flag)
 {
     return (bitmask & flag) != 0;
 }
-
 
 int count_bits(int x) {
     int count = 0;
@@ -265,7 +280,7 @@ size_t sprite_to_animation(
         if (width == 0) width = sprite_set.figure_width;
         size_t anchor = sprite->anchors[anchor_index];
         assert(anchor != 0);
-        Rectangle crop_rect = {.height = img->height, .width = width, .x = anchor - width/2, .y = 0}; 
+        Rectangle crop_rect = {.height = img->height, .width = width, .x = anchor - width/2, .y = img->height - sprite_set.figure_height}; 
         ImageCrop(&cropped_image, crop_rect);
         float resize_coef = (float)DEFAULT_THING_TEX_HEIGHT/cropped_image.height;   
         // float resize_coef = 0.5;   
@@ -408,19 +423,40 @@ void draw_hit_text(Game* game)
 
 void draw_stage(Game* game)
 {
-    DrawLine(0, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
+    (void)game;
+    DrawLine(LINE_NUMBER_OFFSET, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
+
+    // static char render_text[2];  
+    // size_t font_size = COLUMN_CELL_HEIGHT - 5;
+    // render_text[1] = '\0';
+    // for(size_t i = 0; i < game->thing_num; i++)
+    // {
+    //     Thing* thing = &game->things[i];
+    //     if(thing->kind != GRID_CELL) continue;
+    //     render_text[0] = game->hit_text[thing->hit_text_idx];
+    //     int text_len_px = MeasureText(render_text, font_size);
+    //     // DrawRectangleLines(thing->position.x - COLUMN_CELL_WIDTH/2, STAGE_COORDINATE, COLUMN_CELL_WIDTH, COLUMN_CELL_HEIGHT, RED);
+    //     DrawText(render_text, thing->position.x - text_len_px/2, SCREEN_HEIGHT - font_size , font_size, BLACK);
+    //     // RLAPI void DrawRectangle(int posX, int posY, int width, int height, Color color);
+    // }
+}
+
+void draw_grid(Game* game)
+{
+    // DrawLine(0, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
     static char render_text[2];  
     size_t font_size = COLUMN_CELL_HEIGHT - 5;
+    Color outline_color = BLACK;
+    outline_color.a = GRID_TRANSPARENCY;
     render_text[1] = '\0';
     for(size_t i = 0; i < game->thing_num; i++)
     {
-
         Thing* thing = &game->things[i];
-        if(thing->kind != COLUMN_CELL) continue;
+        if(thing->kind != GRID_CELL) continue;
         render_text[0] = game->hit_text[thing->hit_text_idx];
         int text_len_px = MeasureText(render_text, font_size);
-        DrawRectangleLines(thing->position.x - COLUMN_CELL_WIDTH/2, STAGE_COORDINATE, COLUMN_CELL_WIDTH, COLUMN_CELL_HEIGHT, RED);
-        DrawText(render_text, thing->position.x - text_len_px/2, STAGE_COORDINATE, font_size, BLACK);
+        DrawRectangleLines(thing->position.x - CELL_WIDTH/2, thing->position.y - CELL_HEIGHT/2, CELL_WIDTH, CELL_HEIGHT, outline_color);
+        DrawText(render_text, thing->position.x - text_len_px/2, thing->position.y - font_size/2, font_size, outline_color);
         // RLAPI void DrawRectangle(int posX, int posY, int width, int height, Color color);
     }
 }
@@ -626,6 +662,7 @@ Game init_game()
     {
         SpriteSet set = {0};
         set.kind = ORC;
+        set.figure_height = 65;
         set.sprites[IDLE_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
         set.sprites[ATTACK_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
         set.sprites[WALK_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
@@ -642,6 +679,7 @@ Game init_game()
     { 
         SpriteSet set = {0};
         set.kind = YAMABUSHI;
+        set.figure_height = 100;
         set.sprites[IDLE_IMAGE].image_path = "assets/Yamabushi/Idle.png";
         set.sprites[ATTACK_IMAGE].image_path = "assets/Yamabushi/Attack_1.png";
         set.sprites[WALK_IMAGE].image_path = "assets/Yamabushi/Walk.png";
@@ -660,30 +698,27 @@ Game init_game()
         {
             set.sprites[JUMP_IMAGE].widths[i] = (int)set.figure_width;
         }
+        for (size_t i = 0; i < set.sprites[ATTACK_IMAGE].frame_num; i++)
+        {
+            set.sprites[ATTACK_IMAGE].widths[i] = (int)set.figure_width;
+        }
+
+        set.sprites[ATTACK_IMAGE].widths[1] = set.figure_width + 30;
         load_animations(&game, set, PLAYER_TRAITS);
     }
-    // generate unique characters
-    int start_pos_x = COLUMN_CELL_WIDTH/2;
-    int seen[256] = {0};
-    assert(CHARSET_SIZE >= NUM_COLUMNS);
-    for (thing_idx i = 0; i < (thing_idx)NUM_COLUMNS; i++)
+    for (int column = 0; column < (int)GRID_X; column++)
     {
-        Thing* thing = &game.things[game.thing_num]; 
-        thing->position.x = start_pos_x;
-        thing->position.y = STAGE_COORDINATE;
-        thing->kind = COLUMN_CELL;
-        int idx = 0;
-        do
+        for (int line = 0; line < (int)GRID_Y; line++)
         {
+            Thing* thing = &game.things[game.thing_num]; 
+            thing->position.x = LINE_NUMBER_OFFSET + CELL_WIDTH*column + CELL_WIDTH/2;
+            thing->position.y = CELL_HEIGHT*line + CELL_HEIGHT/2;
+            thing->kind = GRID_CELL;
+            int idx = 0;
             idx = rand() % HIT_TEXT_CAPACITY;
+            thing->hit_text_idx = idx;
+            game.thing_num++; 
         }
-        while (seen[(unsigned char)game.hit_text[idx]] != 0);
-
-        seen[(unsigned char)game.hit_text[idx]] = 1;
-        thing->hit_text_idx = idx;
-
-        game.thing_num++; 
-        start_pos_x += COLUMN_CELL_WIDTH;
     }
     return game;
 }
@@ -691,8 +726,25 @@ Game init_game()
 void draw_game(Game* game)
 {
     draw_stage(game);
+    draw_grid(game);
     draw_hit_text(game);
     draw_things(game);
+}
+
+bool is_num_pressed(char key)
+{
+    // KEY_ZERO            = 48,       // Key: 0
+    // KEY_ONE             = 49,       // Key: 1
+    // KEY_TWO             = 50,       // Key: 2
+    // KEY_THREE           = 51,       // Key: 3
+    // KEY_FOUR            = 52,       // Key: 4
+    // KEY_FIVE            = 53,       // Key: 5
+    // KEY_SIX             = 54,       // Key: 6
+    // KEY_SEVEN           = 55,       // Key: 7
+    // KEY_EIGHT           = 56,       // Key: 8
+    // KEY_NINE            = 57,       // Key: 9
+    if ((key >= KEY_ZERO) && (key <= KEY_NINE)) return true;
+    return false;
 }
 
 void process_input(Game* game)
@@ -700,13 +752,18 @@ void process_input(Game* game)
     Thing* player = &game->things[game->player_idx];
     // make sure that hit animation and input animation is not canceled by input
     if ((check_bitmask(player->attr, INPUTTING)) || (check_bitmask(player->attr, HITTING))) return;
-    if (game->key_pressed == 'i')
+    if ((game->key_pressed == 'i') || (is_num_pressed(game->key_pressed)))
     {
         if ((check_bitmask(player->attr, IDLING) || (check_bitmask(player->attr, MOVING))))
         {
             player->attr = INPUTTING;
             state_transition(game, game->player_idx);
             game->key_pressed = 0;
+            if (is_num_pressed(game->key_pressed)) 
+            {
+                int key_num = game->key_pressed - 48;
+                game->recorded_num = game->recorded_num*10 + key_num;
+            }
             return;
         }
     }
@@ -770,7 +827,9 @@ void npc_ai(Game* game)
                     thing->orientation = Vector2Normalize(thing->orientation);
                 }
             }
-            float dist_to_player = Vector2Distance(thing->position, player->position);
+            float dist_to_player = 0;
+            if ((thing->traits & CAN_FLY) == CAN_FLY) dist_to_player = Vector2Distance(thing->position, player->position);
+            else dist_to_player = fabs(thing->position.x - player->position.x);
             if (dist_to_player > 64)
             {
                 thing->movement_speed = WALK_INCREMENT_PIXEL_PER_FRAME/2;

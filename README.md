@@ -26,3 +26,7 @@ $ ./nob -run
 
 ## Todo
 - add widths for all sprite set. Default approach makes hit animation to be cropped.
+- orc enemy is not stopping moving when played is directly above it
+- add take off and land animations
+- flying animation wings flapping in reverse order
+- 
