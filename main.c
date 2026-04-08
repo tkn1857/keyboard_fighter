@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include "raylib.h"
 #include "raymath.h"
+//enable debug view of thing position, hitbox, reach
+#define DEBUG_THINGS
 
 #define MAX_THINGS                                  1024
 #define MAX_ANIMATIONS                              1024
@@ -17,19 +19,17 @@
 #define SCREEN_HEIGHT                               1024 * 1
 #define LINE_NUMBER_OFFSET                          (int)(SCREEN_WIDTH*0.1)
 
-// #define GRID_Y                                      SCREEN_HEIGHT/DEFAULT_THING_TEX_HEIGHT
-
-#define GRID_Y                                      8 
+#define GRID_Y                                      10 
 #define GRID_X                                      30 
 
 #define CELL_HEIGHT                                 (int)(SCREEN_HEIGHT/GRID_Y)  
 #define CELL_WIDTH                                  (int)(SCREEN_WIDTH/GRID_X)
-#define GRID_TRANSPARENCY                           100
+#define GRID_TRANSPARENCY                           20 
 
-#define DEFAULT_THING_TEX_HEIGHT		            (int)(CELL_HEIGHT * 0.7)
+#define THING_HEIGHT_DEFAULT		                (int)(CELL_HEIGHT * 0.7)
 
-#define HIT_TEXT_POSITION_Y                         SCREEN_HEIGHT*0.2
-#define HIT_TEXT_HEIGHT                             SCREEN_HEIGHT*0.1
+#define HIT_TEXT_POSITION_Y                         (int)(CELL_HEIGHT * 0.9)
+#define HIT_TEXT_HEIGHT                             (int)(CELL_HEIGHT * 0.1)
 #define HIT_TEXT_CAPACITY                           500
 
 #define STAGE_COORDINATE                            CELL_HEIGHT * (GRID_Y - 2)
@@ -81,12 +81,9 @@ const char CHARSET[] =
 
 #define CHARSET_SIZE                                (sizeof(CHARSET)/sizeof(CHARSET[0]) - 1)
 
-#define NUM_COLUMNS                                 CHARSET_SIZE
-#define COLUMN_CELL_WIDTH                           SCREEN_WIDTH/NUM_COLUMNS
-#define COLUMN_CELL_HEIGHT                          30
-
 typedef enum
 {
+    DEFAULT_TRAIT = 0,
     POSITIONABLE = (1<<0),
     CONTROLLABLE = (1<<1),
     CAN_MOVE = (1<<2),
@@ -99,6 +96,7 @@ typedef enum
 
 typedef enum
 {
+    DEFAULT_ATTR = 0,
     IDLING = (1<<0),
     HITTING = (1<<1),
     MOVING = (1<<2),
@@ -115,7 +113,7 @@ Traits PLAYER_TRAITS = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT | C
 
 
 typedef enum{
-    DEFAULT = 0,
+    DEFAULT_THING_KIND = 0,
     KNIGHT,
     ORC,
     YAMABUSHI,
@@ -139,10 +137,12 @@ typedef struct{
     float reach; // in percent from total stage len
     size_t default_movement_speed_px;
     float height; // in percent from CELL_HEIGHT
+    float width; // in percent from CELL_HEIGHT
 } Thing;
 
 typedef enum
 {
+    DEFAULT_IMAGE,
     IDLE_IMAGE,
     ATTACK_IMAGE,
     WALK_IMAGE,
@@ -185,7 +185,7 @@ typedef struct
     int recorded_num;
     char input[HIT_TEXT_CAPACITY];
     thing_idx player_idx;
-    size_t thing_num;
+    thing_idx thing_num;
     size_t animation_num;
 } Game;
 
@@ -278,7 +278,7 @@ size_t sprite_to_animation(
         assert(anchor != 0);
         Rectangle crop_rect = {.height = img->height, .width = width, .x = anchor - width/2, .y = img->height - sprite_set.figure_height}; 
         ImageCrop(&cropped_image, crop_rect);
-        float resize_coef = (float)DEFAULT_THING_TEX_HEIGHT/cropped_image.height;   
+        float resize_coef = (float)THING_HEIGHT_DEFAULT/cropped_image.height;   
         // float resize_coef = 0.5;   
         int new_width = resize_coef * (float) cropped_image.width;
         int new_height = resize_coef * (float) cropped_image.height;
@@ -378,10 +378,10 @@ thing_idx get_animation_idx(Game* game, thing_idx idx)
 {
     Thing* thing = &game->things[idx];
 
-    int best_index = -1;
+    int best_index = 0;
     int max_overlap = -1;
 
-    for (int i = 0; i < (int)game->animation_num; i++) {
+    for (size_t i = 0; i < game->animation_num; i++) {
         if (!(game->animations[i].kind == thing->kind)) continue;
         int overlap = count_bits(game->animations[i].attr & thing->attr);
 
@@ -422,7 +422,7 @@ void draw_hit_text(Game* game)
     int text_len_px = MeasureText(render_text, font_size);
     // DrawLine(0, HIT_TEXT_POSITION_Y, SCREEN_WIDTH, HIT_TEXT_POSITION_Y, BLACK);
     // DrawText(&player->hit_text[player->hit_text_idx % HIT_TEXT_CAPACITY], 0, HIT_TEXT_POSITION_Y, SCREEN_WIDTH/10, BLACK);
-    DrawText(render_text, player->position.x - text_len_px/2, player->position.y - 96, font_size, BLACK);
+    DrawText(render_text, player->position.x - text_len_px/2, player->position.y - HIT_TEXT_POSITION_Y, font_size, BLACK);
 
     // DrawLine(0, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, SCREEN_WIDTH, HIT_TEXT_POSITION_Y + HIT_TEXT_HEIGHT, BLACK);
 }
@@ -451,11 +451,11 @@ void draw_grid(Game* game)
 {
     // DrawLine(0, STAGE_COORDINATE, SCREEN_WIDTH, STAGE_COORDINATE, BLACK);
     static char render_text[2];  
-    size_t font_size = COLUMN_CELL_HEIGHT - 5;
+    size_t font_size = CELL_HEIGHT * 0.4;
     Color outline_color = BLACK;
     outline_color.a = GRID_TRANSPARENCY;
     render_text[1] = '\0';
-    for(size_t i = 0; i < game->thing_num; i++)
+    for(thing_idx i = 0; i < game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
         if(thing->kind != GRID_CELL) continue;
@@ -472,27 +472,42 @@ bool draw_things(Game * game)
     for(thing_idx i = 0; i < MAX_THINGS; i++)
     {
         Thing * thing = &game->things[i];
-        if(thing->kind == DEFAULT) continue;
+        if(thing->kind == DEFAULT_THING_KIND) continue;
         thing_idx animation_idx = get_animation_idx(game, i);
-        if (animation_idx < 0) return true;
+        if (animation_idx == 0) continue;
         Animation* animation = &game->animations[animation_idx];
         int state_duration = animation->duration_frames;
-        assert(state_duration != 0);
+        if (state_duration == 0) continue;
         size_t animation_frame = (size_t)(((float)thing->state_cnt/(float)state_duration) * (float)animation->sprite_num);
         if (animation_frame >= animation->sprite_num) animation_frame = animation->sprite_num - 1;
         Texture2D* texture = &animation->textures[animation_frame];
         if (texture->id == 0) continue;
-        Vector2 texture_position = {.x = thing->position.x - texture->width/2 ,.y = thing->position.y - texture->height};
-
+        Vector2 texture_position = {.x = thing->position.x - texture->width/2.0 ,.y = thing->position.y - texture->height};
         DrawTextureV(*texture, texture_position, WHITE);
+#ifdef DEBUG_THINGS
         DrawCircle(thing->position.x , thing->position.y, 5, GREEN);
+        Rectangle hitbox = {.height = CELL_HEIGHT * thing->height, .width = CELL_WIDTH * thing->width, .x = texture_position.x, .y = texture_position.y};
+        Rectangle texture_outline = {.height = texture->height, .width = texture->width, .x = texture_position.x, .y = texture_position.y};
+        DrawRectangleLinesEx(hitbox, 1, RED);
+        DrawRectangleLinesEx(texture_outline, 1, BLUE);
+
+        // Reach is shown as a vertical marker line at reach X on stage.
+        if ((thing->traits & CAN_HIT) == CAN_HIT)
+        {
+            float reach_len_px = CELL_WIDTH * thing->reach;
+            float dir_x = (thing->orientation.x < 0.0f) ? -1.0f : 1.0f;
+            float reach_x = thing->position.x + dir_x * reach_len_px;
+            DrawLineV((Vector2){reach_x, STAGE_COORDINATE - CELL_HEIGHT},
+                      (Vector2){reach_x, STAGE_COORDINATE},
+                      PURPLE);
+        }
+#endif //DEBUG_THINGS
     }   
     return true;
 }
 
 void generate_hit_text(Game* game)
 {
-
     for(size_t i = 0; i < HIT_TEXT_CAPACITY; i++) 
     {
        int idx = rand() % CHARSET_SIZE;
@@ -510,6 +525,19 @@ void calc_attributes(Game* game)
             thing->attr = MOVING; 
             state_transition(game, i);
         }   
+        if (check_bitmask(thing->attr, HITTING))
+        {
+            int anim_idx = get_animation_idx(game, i);
+            Animation* anim  = &game->animations[anim_idx];
+            size_t current_state_dur = anim->duration_frames; 
+            if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
+            {
+                for(thing_idx check_for_hit_thing = 0; check_for_hit_thing  < (thing_idx)game->thing_num; check_for_hit_thing++)
+                {
+                             
+                }
+            }
+        }
         if (!Vector2Equals(thing->orientation, default_orientation))
         {
             thing->attr |= LOOKS_LEFT;
@@ -528,7 +556,7 @@ void process_game(Game* game)
     {
         Thing* thing = &game->things[i];
         int anim_idx = get_animation_idx(game, i);
-        if (anim_idx == -1) return;
+        // if (anim_idx == -1) continue;
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames; 
         
@@ -547,6 +575,7 @@ void process_game(Game* game)
                 continue;
             }
         }
+        
         if (check_bitmask(thing->attr, MOVING))
         {
             // needed to stop immidiately after after walk speed is 0
@@ -574,11 +603,11 @@ void process_game(Game* game)
 
 void increment_game(Game* game)
 {
-    for(int i = 0; i < (thing_idx)game->thing_num; i++)
+    for(thing_idx i = 0; i < game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
         int anim_idx = get_animation_idx(game, i);
-        if (anim_idx == -1) return;
+        // if (anim_idx == -1) continue;
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
         if (current_state_dur <= thing->state_cnt) 
@@ -613,13 +642,14 @@ void init_player(Game* game, thing_idx idx)
     game->things[idx].movement_speed = 0;
     game->things[idx].traits = PLAYER_TRAITS;
     game->things[idx].kind = YAMABUSHI;
+    // game->things[idx].kind = KNIGHT;
     game->thing_num++;
 }
 
 void init_orc(Game* game)
 {
     Vector2 position = {3 * SCREEN_WIDTH/4, STAGE_COORDINATE};
-    thing_idx idx = game->thing_num;
+    thing_idx idx = game->thing_num + 1;
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
@@ -632,7 +662,7 @@ void init_orc(Game* game)
 void init_knight_enemy(Game* game)
 {
     Vector2 position = {SCREEN_WIDTH/4, STAGE_COORDINATE};
-    thing_idx idx = game->thing_num;
+    thing_idx idx = game->thing_num + 1;
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
@@ -644,27 +674,36 @@ void init_knight_enemy(Game* game)
 Game init_game()
 {
     Game game = {0};
+    //default texture is useless curently
+    Image default_texture_image = GenImageColor(CELL_WIDTH, CELL_HEIGHT, PURPLE);
+    game.animations[0].textures[0] = LoadTextureFromImage(default_texture_image);
+    assert( game.animations[0].textures[0].width == CELL_WIDTH);
+    game.animations[0].sprite_num = 1;
+    game.animation_num++;
+
     generate_hit_text(&game);
 
-    game.player_idx = 0;
+    game.player_idx = 1;
     init_player(&game, game.player_idx);
     init_orc(&game);
-    // init_knight_enemy(&game); 
 
-   
-    SpriteSet knigth_set = {0};
-    knigth_set.kind = KNIGHT;
-    knigth_set.sprites[IDLE_IMAGE].image_path = "assets/Knight_3/Idle.png";
-    knigth_set.sprites[ATTACK_IMAGE].image_path = "assets/Knight_3/Attack 2.png";
-    knigth_set.sprites[WALK_IMAGE].image_path = "assets/Knight_2/Walk.png";
-    knigth_set.sprites[IDLE_IMAGE].frame_num = 4;
-    knigth_set.sprites[ATTACK_IMAGE].frame_num = 4;
-    knigth_set.sprites[WALK_IMAGE].frame_num = 8;
-    knigth_set.figure_width = 64;
-    ADD_ANCHORS(knigth_set, IDLE_IMAGE, 64, 192, 320, 448);
-    ADD_ANCHORS(knigth_set, WALK_IMAGE, 64, 192, 320, 448, 576, 704, 832, 960);
-    ADD_ANCHORS(knigth_set, ATTACK_IMAGE, 64, 192, 320, 448);
-    load_animations(&game, knigth_set, PLAYER_TRAITS);
+    { 
+        SpriteSet set = {0};
+        set.kind = KNIGHT;
+        set.sprites[IDLE_IMAGE].image_path = "assets/Knight_3/Idle.png";
+        set.sprites[ATTACK_IMAGE].image_path = "assets/Knight_3/Attack 2.png";
+        set.sprites[WALK_IMAGE].image_path = "assets/Knight_2/Walk.png";
+        set.sprites[IDLE_IMAGE].frame_num = 4;
+        set.sprites[ATTACK_IMAGE].frame_num = 4;
+        set.sprites[WALK_IMAGE].frame_num = 8;
+        //fix this
+        set.figure_width = 100;
+        set.figure_height = 64;
+        ADD_ANCHORS(set, IDLE_IMAGE, 64, 192, 320, 448);
+        ADD_ANCHORS(set, WALK_IMAGE, 64, 192, 320, 448, 576, 704, 832, 960);
+        ADD_ANCHORS(set, ATTACK_IMAGE, 64, 192, 320, 448);
+        load_animations(&game, set, PLAYER_TRAITS);
+    }
     {
         SpriteSet set = {0};
         set.kind = ORC;
@@ -675,7 +714,7 @@ Game init_game()
         set.sprites[IDLE_IMAGE].frame_num = 5;
         set.sprites[ATTACK_IMAGE].frame_num = 4;
         set.sprites[WALK_IMAGE].frame_num = 7;
-        set.figure_width = 96; 
+        set.figure_width = 64; 
 
         ADD_ANCHORS(set, IDLE_IMAGE, 48, 144, 240, 336, 432);
         ADD_ANCHORS(set, WALK_IMAGE, 48, 144, 240, 336, 432, 528, 624);
@@ -712,13 +751,41 @@ Game init_game()
         set.sprites[ATTACK_IMAGE].widths[1] = set.figure_width + 30;
         load_animations(&game, set, PLAYER_TRAITS);
     }
+    for(thing_idx i = 0; i < game.thing_num; i++)
+    {
+        {
+            // calculate reach from attack animation size
+            Thing* thing = &game.things[i];
+            thing->attr = HITTING;
+            thing_idx anim_idx = get_animation_idx(&game, i);
+            Animation* anim = &game.animations[anim_idx];
+            int max_attack_width = 0;
+            for (size_t frame = 0; frame < anim->sprite_num; frame++)
+            {
+                Texture2D* attack_texture = &anim->textures[frame];
+                if (attack_texture->id == 0) continue;
+                if ((int)attack_texture->width > max_attack_width) max_attack_width = attack_texture->width;
+            }
+            if (max_attack_width == 0) max_attack_width = anim->textures[0].width;
+            thing->reach = (float)max_attack_width / (float)CELL_WIDTH / 2.0f;
+        }
+        {
+            // calculate hitbox from idle animation size
+            Thing* thing = &game.things[i];
+            thing->attr = IDLING;
+            thing_idx anim_idx = get_animation_idx(&game, i);
+            Animation* anim = &game.animations[anim_idx];
+            thing->height = (float)(anim->textures[0].height) / (float)(CELL_HEIGHT);
+            thing->width = (float)(anim->textures[0].width) / (float)(CELL_WIDTH);
+        }
+    }
     for (int column = 0; column < (int)GRID_X; column++)
     {
         for (int line = 0; line < (int)GRID_Y; line++)
         {
-            Thing* thing = &game.things[game.thing_num]; 
-            thing->position.x = LINE_NUMBER_OFFSET + CELL_WIDTH*column + CELL_WIDTH/2;
-            thing->position.y = CELL_HEIGHT*line + CELL_HEIGHT/2;
+            Thing* thing = &game.things[game.thing_num + 1]; 
+            thing->position.x = LINE_NUMBER_OFFSET + CELL_WIDTH*column + CELL_WIDTH/2.0;
+            thing->position.y = CELL_HEIGHT*line + CELL_HEIGHT/2.0;
             thing->kind = GRID_CELL;
             int idx = 0;
             idx = rand() % HIT_TEXT_CAPACITY;
