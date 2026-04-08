@@ -455,7 +455,7 @@ void draw_grid(Game* game)
     Color outline_color = BLACK;
     outline_color.a = GRID_TRANSPARENCY;
     render_text[1] = '\0';
-    for(thing_idx i = 0; i < game->thing_num; i++)
+    for(thing_idx i = 1; i <= game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
         if(thing->kind != GRID_CELL) continue;
@@ -517,7 +517,7 @@ void generate_hit_text(Game* game)
 
 void calc_attributes(Game* game)
 {
-    for(thing_idx i = 0; i < (thing_idx)game->thing_num; i++)
+    for(thing_idx i = 1; i <= (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
         if ((thing->movement_speed != 0) && (!check_bitmask(thing->attr, MOVING)))
@@ -532,7 +532,7 @@ void calc_attributes(Game* game)
             size_t current_state_dur = anim->duration_frames; 
             if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
             {
-                for(thing_idx check_for_hit_thing = 0; check_for_hit_thing  < (thing_idx)game->thing_num; check_for_hit_thing++)
+                for(thing_idx check_for_hit_thing = 1; check_for_hit_thing  <= (thing_idx)game->thing_num; check_for_hit_thing++)
                 {
                              
                 }
@@ -552,7 +552,7 @@ void calc_attributes(Game* game)
 void process_game(Game* game)
 {
     calc_attributes(game);
-    for(thing_idx i = 0; i < (thing_idx)game->thing_num; i++)
+    for(thing_idx i = 1; i <= (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
         int anim_idx = get_animation_idx(game, i);
@@ -603,7 +603,7 @@ void process_game(Game* game)
 
 void increment_game(Game* game)
 {
-    for(thing_idx i = 0; i < game->thing_num; i++)
+    for(thing_idx i = 1; i <= game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
         int anim_idx = get_animation_idx(game, i);
@@ -634,6 +634,7 @@ void increment_game(Game* game)
 
 void init_player(Game* game, thing_idx idx)
 {
+    assert(idx == game->thing_num + 1);
     Vector2 player_position = { SCREEN_WIDTH/2, STAGE_COORDINATE };
     game->things[idx].position = player_position;
     game->things[idx].orientation.x = 1;
@@ -649,26 +650,24 @@ void init_player(Game* game, thing_idx idx)
 void init_orc(Game* game)
 {
     Vector2 position = {3 * SCREEN_WIDTH/4, STAGE_COORDINATE};
-    thing_idx idx = game->thing_num + 1;
+    thing_idx idx = ++game->thing_num;
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
     game->things[idx].traits = ENEMY_TRAITS_DEFAULT;
     game->things[idx].kind = ORC;
-    game->thing_num++;
 } 
 
 
 void init_knight_enemy(Game* game)
 {
     Vector2 position = {SCREEN_WIDTH/4, STAGE_COORDINATE};
-    thing_idx idx = game->thing_num + 1;
+    thing_idx idx = ++game->thing_num;
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
     game->things[idx].traits = ENEMY_TRAITS_DEFAULT;
     game->things[idx].kind = KNIGHT;
-    game->thing_num++;
 }
 
 Game init_game()
@@ -751,7 +750,7 @@ Game init_game()
         set.sprites[ATTACK_IMAGE].widths[1] = set.figure_width + 30;
         load_animations(&game, set, PLAYER_TRAITS);
     }
-    for(thing_idx i = 0; i < game.thing_num; i++)
+    for(thing_idx i = 1; i <= game.thing_num; i++)
     {
         {
             // calculate reach from attack animation size
@@ -783,14 +782,13 @@ Game init_game()
     {
         for (int line = 0; line < (int)GRID_Y; line++)
         {
-            Thing* thing = &game.things[game.thing_num + 1]; 
+            Thing* thing = &game.things[++game.thing_num]; 
             thing->position.x = LINE_NUMBER_OFFSET + CELL_WIDTH*column + CELL_WIDTH/2.0;
             thing->position.y = CELL_HEIGHT*line + CELL_HEIGHT/2.0;
             thing->kind = GRID_CELL;
             int idx = 0;
             idx = rand() % HIT_TEXT_CAPACITY;
             thing->hit_text_idx = idx;
-            game.thing_num++; 
         }
     }
     return game;
