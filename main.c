@@ -11,6 +11,7 @@
 #define MAX_ANIMATIONS                              1024
 #define MAX_SPRITES                                 100
 #define MAX_SPRITES_PER_SPRITE_SHEET                24
+#define MAX_TEXTURES_PER_ANIMATION                  24 * 2
 
 #define SCREEN_WIDTH                                1024 * 1
 #define SCREEN_HEIGHT                               1024 * 1
@@ -40,24 +41,19 @@
 
 #define HIT_DURATION_MS                             300.0f
 #define HIT_DURATION_FRAMES                         (int)((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
-#define HIT_ANIMATION_FRAMES                        3
 
 #define IDLE_DURATION_MS                            1000                               
 #define IDLE_DURATION_FRAMES                        (int)((int)IDLE_DURATION_MS / (int)MS_PER_FRAME)
-#define IDLE_ANIMATION_FRAMES                       4
 
 #define INPUT_MODE_DURATION_MS                      300 
 #define INPUT_MODE_DURATION_FRAMES                  (int)((int)INPUT_MODE_DURATION_MS / (int)MS_PER_FRAME)
-#define INPUT_ANIMATION_FRAMES                      1
 
-#define WALK_ANIMATION_FRAMES                       8
 #define WALK_ANIMATION_DURATION_MS                  500 
 #define WALK_ANIMATION_DURATION_FRAMES              (int)((int)WALK_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
 #define WALK_SPEED_PERC_PER_MS                      0.02f 
 #define WALK_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*WALK_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
 
-#define FLY_ANIMATION_FRAMES                       8
-#define FLY_ANIMATION_DURATION_MS                  500 
+#define FLY_ANIMATION_DURATION_MS                  700 
 #define FLY_ANIMATION_DURATION_FRAMES              (int)((int)FLY_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
 #define FLY_SPEED_PERC_PER_MS                      0.02f 
 #define FLY_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*FLY_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
@@ -248,13 +244,13 @@ size_t sprite_to_animation(
     SpriteSet sprite_set,
     size_t sprite_idx,
     size_t duration_frames,
-    bool* use_anchor // array indicates if anchor should be used or not
+    int* anchors // array indicates if anchor should be used or not
 )
 {
     size_t animation_idx = game->animation_num++;
     assert(animation_idx < MAX_ANIMATIONS);
     Sprite* sprite = &sprite_set.sprites[sprite_idx]; 
-    size_t anchors_num = sprite->frame_num;
+    // size_t anchors_num = sprite->frame_num;
     Animation* anim = &game->animations[animation_idx];
     Animation* inversed_anim = NULL;
     init_animation(anim, attr, sprite_set, duration_frames);
@@ -269,16 +265,16 @@ size_t sprite_to_animation(
 
     size_t frames_num = 0;
     size_t animation_frame_idx = 0;
-    for(size_t anchor_index = 0; anchor_index < anchors_num; anchor_index++)
+    for(size_t anchor_index = 0; anchor_index < MAX_TEXTURES_PER_ANIMATION; anchor_index++)
     {
-        if (use_anchor[anchor_index] == false) continue;
+        if (anchors[anchor_index] == 0) continue;
         else frames_num++;
 
         Image cropped_image = ImageCopy(*img);
         size_t width = sprite->widths[anchor_index];
         // assert(width != 0);
         if (width == 0) width = sprite_set.figure_width;
-        size_t anchor = sprite->anchors[anchor_index];
+        size_t anchor = anchors[anchor_index];
         assert(anchor != 0);
         Rectangle crop_rect = {.height = img->height, .width = width, .x = anchor - width/2, .y = img->height - sprite_set.figure_height}; 
         ImageCrop(&cropped_image, crop_rect);
@@ -309,8 +305,9 @@ size_t sprite_to_animation(
 size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
 {
     size_t num_of_animations = 0;
-    bool use_anchors[MAX_SPRITES_PER_SPRITE_SHEET] = {0};
-    for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = true;}
+    
+    int anchors[MAX_TEXTURES_PER_ANIMATION] = {0};
+    // for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = true;}
     for(ImageKind kind = 0; kind < IMAGE_KIND_NUM; kind++)
     {
         Sprite sprite = sprites.sprites[kind]; 
@@ -319,35 +316,44 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
         assert(image.width != 0);
         sprites.sprites[kind].image = image;
         assert(sprite.frame_num != 0);
-        for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = true;}
+        for(int i = 0;i < MAX_TEXTURES_PER_ANIMATION; i++) {anchors[i] = 0;}
 
         switch(kind)
         {
             case IDLE_IMAGE:
             {
-                num_of_animations = sprite_to_animation(game, traits, IDLING, sprites, IDLE_IMAGE, IDLE_DURATION_FRAMES, use_anchors);
+                for(size_t i = 0;i < sprites.sprites[kind].frame_num; i++) {anchors[i] = sprites.sprites[kind].anchors[i];}
+                num_of_animations = sprite_to_animation(game, traits, IDLING, sprites, IDLE_IMAGE, IDLE_DURATION_FRAMES, anchors);
                 break;
             }   
             case ATTACK_IMAGE:
             {
-
-                for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = false;}
-                use_anchors[0] = true;
-                num_of_animations = sprite_to_animation(game, traits, INPUTTING, sprites, ATTACK_IMAGE, INPUT_MODE_DURATION_FRAMES, use_anchors);
-                for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = true;}
-                use_anchors[0] = false;
-                num_of_animations = sprite_to_animation(game, traits, HITTING, sprites, ATTACK_IMAGE, HIT_DURATION_FRAMES, use_anchors);
+                anchors[0] = sprites.sprites[kind].anchors[0];
+                num_of_animations = sprite_to_animation(game, traits, INPUTTING, sprites, ATTACK_IMAGE, INPUT_MODE_DURATION_FRAMES, anchors);
+                for(size_t i = 0;i < sprites.sprites[kind].frame_num; i++) {anchors[i] = sprites.sprites[kind].anchors[i];}
+                anchors[0] = 0;
+                num_of_animations = sprite_to_animation(game, traits, HITTING, sprites, ATTACK_IMAGE, HIT_DURATION_FRAMES, anchors);
                 break;
             }   
             case WALK_IMAGE:
             {
-                num_of_animations = sprite_to_animation(game, traits, MOVING, sprites, WALK_IMAGE, WALK_ANIMATION_DURATION_FRAMES, use_anchors);
+                for(size_t i = 0;i < sprites.sprites[kind].frame_num; i++) {anchors[i] = sprites.sprites[kind].anchors[i];}
+                num_of_animations = sprite_to_animation(game, traits, MOVING, sprites, WALK_IMAGE, WALK_ANIMATION_DURATION_FRAMES, anchors);
                 break;
             }
             case JUMP_IMAGE:
             {
-                for(int i = 0;i < MAX_SPRITES_PER_SPRITE_SHEET; i++) {use_anchors[i] = false;}
-                for(int i = 5;i <= 10; i++) {use_anchors[i] = true;}
+                size_t fly_anim_texture_index = 0;
+                for(int i = 5;i <= 10; i++) 
+                {
+                    anchors[fly_anim_texture_index] = sprites.sprites[kind].anchors[i];
+                    fly_anim_texture_index++;
+                }
+                for(int i = 10;i >= 5; i--) 
+                {
+                    anchors[fly_anim_texture_index] = sprites.sprites[kind].anchors[i];
+                    fly_anim_texture_index++;
+                }
                 num_of_animations = sprite_to_animation(
                         game,
                         traits,
@@ -355,7 +361,7 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
                         sprites,
                         JUMP_IMAGE,
                         FLY_ANIMATION_DURATION_FRAMES,
-                        use_anchors);
+                        anchors);
                 break;
             }
             default:
