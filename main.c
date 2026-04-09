@@ -8,6 +8,7 @@
 #include "raymath.h"
 //enable debug view of thing position, hitbox, reach
 #define DEBUG_THINGS
+#define DEBUG_ATTR
 
 #define MAX_THINGS                                  1024
 #define MAX_ANIMATIONS                              1024
@@ -47,6 +48,12 @@
 
 #define INPUT_MODE_DURATION_MS                      300 
 #define INPUT_MODE_DURATION_FRAMES                  (int)((int)INPUT_MODE_DURATION_MS / (int)MS_PER_FRAME)
+
+#define DEFEND_ANIMATION_DURATION_MS                300
+#define DEFEND_ANIMATION_DURATION_FRAMES            (int)((int)DEFEND_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
+
+#define TAKING_DAMAGE_ANIMATION_DURATION_MS         300
+#define TAKING_DAMAGE_ANIMATION_DURATION_FRAMES     (int)((int)TAKING_DAMAGE_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
 
 #define WALK_ANIMATION_DURATION_MS                  500 
 #define WALK_ANIMATION_DURATION_FRAMES              (int)((int)WALK_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
@@ -113,6 +120,7 @@ typedef enum
     INPUT_MOVE = (1<<6),
     FLYING = (1<<7),
     DEFENDING = (1<<8),
+    TAKING_DAMAGE = (1<<9),
     // TAKING_OFF = (1<<7),
 } Attributes;
 
@@ -201,6 +209,36 @@ typedef struct
     thing_idx thing_num;
     size_t animation_num;
 } Game;
+
+void print_debug_attributes(Attributes attr)
+{
+    if (attr == DEFAULT_ATTR)
+    {
+        TraceLog(LOG_INFO, "attrs: DEFAULT_ATTR");
+        return;
+    }
+    TraceLog(LOG_INFO, "attrs mask: 0x%X", attr);
+    for (int bit = 0; bit < 32; bit++)
+    {
+        int flag = 1 << bit;
+        if ((attr & flag) == 0) continue;
+        switch (flag)
+        {
+            case IDLING: TraceLog(LOG_INFO, "  IDLING"); break;
+            case HITTING: TraceLog(LOG_INFO, "  HITTING"); break;
+            case MOVING: TraceLog(LOG_INFO, "  MOVING"); break;
+            case LOOKS_LEFT: TraceLog(LOG_INFO, "  LOOKS_LEFT"); break;
+            case INPUTTING: TraceLog(LOG_INFO, "  INPUTTING"); break;
+            case MOVING_FAST: TraceLog(LOG_INFO, "  MOVING_FAST"); break;
+            case INPUT_MOVE: TraceLog(LOG_INFO, "  INPUT_MOVE"); break;
+            case FLYING: TraceLog(LOG_INFO, "  FLYING"); break;
+            case DEFENDING: TraceLog(LOG_INFO, "  DEFENDING"); break;
+            case TAKING_DAMAGE: TraceLog(LOG_INFO, "  TAKING_DAMAGE"); break;
+            default: TraceLog(LOG_INFO, "  UNKNOWN_FLAG(0x%X)", flag); break;
+        }
+    }
+}
+
 
 void state_transition(Game* game, thing_idx idx)
 {
@@ -376,6 +414,18 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
                         JUMP_IMAGE,
                         FLY_ANIMATION_DURATION_FRAMES,
                         anchors);
+                break;
+            }
+            case HURT_IMAGE:
+            {
+                for(size_t i = 0;i < sprites.sprites[kind].frame_num; i++) {anchors[i] = sprites.sprites[kind].anchors[i];}
+                num_of_animations = sprite_to_animation(game, traits, DEFENDING, sprites, HURT_IMAGE, DEFEND_ANIMATION_DURATION_FRAMES, anchors);
+                break;
+            }
+            case DEAD_IMAGE:
+            {
+                for(size_t i = 0;i < sprites.sprites[kind].frame_num; i++) {anchors[i] = sprites.sprites[kind].anchors[i];}
+                num_of_animations = sprite_to_animation(game, traits, TAKING_DAMAGE, sprites, DEAD_IMAGE, TAKING_DAMAGE_ANIMATION_DURATION_FRAMES, anchors);
                 break;
             }
             default:
@@ -562,11 +612,7 @@ void calc_attributes(Game* game)
     for(thing_idx i = 1; i <= (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
-        if ((thing->movement_speed != 0) && (!check_bitmask(thing->attr, MOVING)))
-        {  
-            thing->attr = MOVING; 
-            state_transition(game, i);
-        }   
+           
         if (check_bitmask(thing->attr, HITTING))
         {
             int anim_idx = get_animation_idx(game, i);
@@ -580,25 +626,40 @@ void calc_attributes(Game* game)
                     if (is_in_reach(game, i, check_for_hit_thing_idx))
                     {
                         Thing* attacked = &game->things[check_for_hit_thing_idx]; 
-                        attacked->attr |= DEFENDING;
+                        attacked->attr = DEFENDING;
                         for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {attacked->defend_text[char_idx] = 0;}
                         for (int char_idx = 0; char_idx < thing->damage; char_idx++)
                         {
                             attacked->defend_text[char_idx] = thing->damage_text[char_idx];
                         }
                         state_transition(game, check_for_hit_thing_idx);
-                        
                     }
                 }
             }
         }
-        if (!Vector2Equals(thing->orientation, default_orientation))
+        if ((thing->movement_speed != 0) && (!check_bitmask(thing->attr, MOVING)))
+        {  
+            thing->attr |= MOVING; 
+        }
+        else
+        {
+            thing->attr = clear_bit(thing->attr, MOVING);
+        }
+        if (!Vector2Equals(thing->orientation, default_orientation)) 
         {
             thing->attr |= LOOKS_LEFT;
         }
-        if (thing->position.y < STAGE_COORDINATE)
+        else 
+        {
+            thing->attr = clear_bit(thing->attr, LOOKS_LEFT);
+        }
+        if (thing->position.y != STAGE_COORDINATE) 
         {
             thing->attr |= FLYING;
+        } 
+        else 
+        {
+            thing->attr = clear_bit(thing->attr, FLYING);
         }
     }   
 }
@@ -614,6 +675,13 @@ void process_game(Game* game)
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames; 
         
+        if (check_bitmask(thing->attr, DEFENDING))
+        {
+            thing->movement_speed = 0;
+            thing->damage = 0;
+            for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {thing->damage_text[char_idx] = 0;}
+            continue;
+        }
         if (check_bitmask(thing->attr, INPUTTING))
         {
             if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
@@ -624,11 +692,20 @@ void process_game(Game* game)
             }
             if (game->key_pressed == game->hit_text[thing->hit_text_idx])
             {
-                thing->damage += 1;
                 thing->hit_text_idx = (thing->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
+                thing->damage_text[thing->damage] = game->key_pressed;
+                thing->damage += 1;
                 continue;
             }
         }
+        // if (check_bitmask(thing->attr, HITTING))
+        // {
+        //     if (current_state_dur == thing->state_cnt)
+        //     {
+        //         for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {thing->damage_text[char_idx] = 0;}
+        //     }
+        //     continue;
+        // }
         
         if (check_bitmask(thing->attr, MOVING))
         {
@@ -641,55 +718,69 @@ void process_game(Game* game)
             thing->position.x += thing->movement_speed * thing->orientation.x;
             thing->position.y += thing->movement_speed * thing->orientation.y;
             if(thing->position.y >= STAGE_COORDINATE) thing->position.y = STAGE_COORDINATE;
-            // if (Vector2Equals(thing->orientation, default_orientation))
-            // {
-            //     thing->position.x += thing->movement_speed;
-            // }
-            // else
-            // {
-            //     thing->position.x -= thing->movement_speed;
-            // }
             continue;
         }
     }   
 }   
-
+char get_first_char(char* arr, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+    {
+        if (arr[i] != 0) return arr[i];
+    }
+    return 0;
+}
 
 void increment_game(Game* game)
 {
     for(thing_idx i = 1; i <= game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
+        size_t state_cnt = thing->state_cnt++;
+        Attributes old_attr = thing->attr;
         int anim_idx = get_animation_idx(game, i);
         // if (anim_idx == -1) continue;
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
-        // if ((thing->attr & DEFENDING) == DEFENDING) 
-        // {
-        //     current_state_dur = DEFENDING_STATE_FRAMES;
-        //     if (current_state_dur <= thing->state_cnt) 
-        //     {
-        //
-        //     }
-        // }
-        if (current_state_dur <= thing->state_cnt) 
+        if (current_state_dur <= state_cnt) 
         {
             thing->damage = 0;
             if(thing->movement_speed == 0)
             {
-                thing->attr = IDLING;
+                thing->attr = clear_bit(thing->attr, MOVING);
                 state_transition(game, i);
             }
             else
             {
-                thing->attr = MOVING;
+                thing->attr |= MOVING;
                 state_transition(game, i);
             }
-            // Keep the first frame after a loop/state transition.
-            // Incrementing immediately here causes a visible hitch at loop boundaries.
-            continue;
+            // if (check_bitmask(thing->attr, DEFENDING) && (get_first_char(thing->defend_text, DEFEND_TEXT_CAPACITY) != 0))
+            if (check_bitmask(thing->attr, DEFENDING))
+            {
+                thing->attr = TAKING_DAMAGE;
+                // thing->attr = clear_bit(thing->attr, DEFENDING);
+                state_transition(game, i);
+                // continue;
+            }
+            if (check_bitmask(thing->attr, DEFAULT_ATTR))
+            {
+                thing->attr = IDLING;
+                state_transition(game, i);
+            }
+
         }
-        thing->state_cnt++;
+        Attributes new_attr = thing->attr;
+#ifdef DEBUG_ATTR
+        if (new_attr != old_attr)
+        {
+            if(thing->kind == ORC)
+            {
+                TraceLog(LOG_INFO,  "Attributes changed for index %d: old: %d, new: %d ", i, old_attr, new_attr);
+                print_debug_attributes(new_attr);
+            }
+        }
+#endif //DEBUG_ATTR
     }
 
 }
@@ -697,7 +788,7 @@ void increment_game(Game* game)
 void init_player(Game* game, thing_idx idx)
 {
     assert(idx == game->thing_num + 1);
-    Vector2 player_position = { SCREEN_WIDTH/2, STAGE_COORDINATE };
+    Vector2 player_position = { SCREEN_WIDTH/2.0, STAGE_COORDINATE };
     game->things[idx].position = player_position;
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
@@ -772,14 +863,20 @@ Game init_game()
         set.sprites[IDLE_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Idle.png";
         set.sprites[ATTACK_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Attack_1.png";
         set.sprites[WALK_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Walk.png";
+        set.sprites[HURT_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Hurt.png";
+        set.sprites[DEAD_IMAGE].image_path = "assets/Craftpix_Orc/Orc_Berserk/Dead.png";
         set.sprites[IDLE_IMAGE].frame_num = 5;
         set.sprites[ATTACK_IMAGE].frame_num = 4;
         set.sprites[WALK_IMAGE].frame_num = 7;
+        set.sprites[HURT_IMAGE].frame_num = 2;
+        set.sprites[DEAD_IMAGE].frame_num = 4;
         set.figure_width = 64; 
 
         ADD_ANCHORS(set, IDLE_IMAGE, 48, 144, 240, 336, 432);
         ADD_ANCHORS(set, WALK_IMAGE, 48, 144, 240, 336, 432, 528, 624);
         ADD_ANCHORS(set, ATTACK_IMAGE, 45, 140, 245, 341);
+        ADD_ANCHORS(set, HURT_IMAGE, 48, 144);
+        ADD_ANCHORS(set, DEAD_IMAGE, 48, 144, 240, 336);
         load_animations(&game, set, PLAYER_TRAITS);
     }
     { 
@@ -790,16 +887,22 @@ Game init_game()
         set.sprites[ATTACK_IMAGE].image_path = "assets/Yamabushi/Attack_1.png";
         set.sprites[WALK_IMAGE].image_path = "assets/Yamabushi/Walk.png";
         set.sprites[JUMP_IMAGE].image_path = "assets/Yamabushi/Jump.png";
+        set.sprites[HURT_IMAGE].image_path = "assets/Yamabushi/Hurt.png";
+        set.sprites[DEAD_IMAGE].image_path = "assets/Yamabushi/Dead.png";
         set.sprites[IDLE_IMAGE].frame_num = 6;
         set.sprites[ATTACK_IMAGE].frame_num = 3;
         set.sprites[WALK_IMAGE].frame_num = 8;
         set.sprites[JUMP_IMAGE].frame_num = 15;
+        set.sprites[HURT_IMAGE].frame_num = 3;
+        set.sprites[DEAD_IMAGE].frame_num = 6;
         set.figure_width = 100; 
 
         ADD_ANCHORS(set, IDLE_IMAGE, 68, 200, 324, 452, 580, 708);
         ADD_ANCHORS(set, WALK_IMAGE, 64, 192, 320, 448, 576, 704, 832, 960);
         ADD_ANCHORS(set, ATTACK_IMAGE, 55, 189, 313);
         ADD_ANCHORS(set, JUMP_IMAGE, 64, 192, 320, 448, 576, 704, 832, 960, 1088, 1216, 1344, 1472, 1600, 1728, 1856);
+        ADD_ANCHORS(set, HURT_IMAGE, 64, 192, 320);
+        ADD_ANCHORS(set, DEAD_IMAGE, 64, 192, 320, 448, 576, 704);
         for (size_t i = 0; i < set.sprites[JUMP_IMAGE].frame_num; i++)
         {
             set.sprites[JUMP_IMAGE].widths[i] = (int)set.figure_width;
