@@ -7,7 +7,7 @@
 #include "raylib.h"
 #include "raymath.h"
 //enable debug view of thing position, hitbox, reach
-#define DEBUG_THINGS
+// #define DEBUG_THINGS
 // #define DEBUG_ATTR
 
 #define MAX_THINGS                                  1024
@@ -49,7 +49,7 @@
 #define INPUT_MODE_DURATION_MS                      300 
 #define INPUT_MODE_DURATION_FRAMES                  (int)((int)INPUT_MODE_DURATION_MS / (int)MS_PER_FRAME)
 
-#define DEFEND_ANIMATION_DURATION_MS                300
+#define DEFEND_ANIMATION_DURATION_MS                3000
 #define DEFEND_ANIMATION_DURATION_FRAMES            (int)((int)DEFEND_ANIMATION_DURATION_MS / (int)MS_PER_FRAME)
 
 #define TAKING_DAMAGE_ANIMATION_DURATION_MS         300
@@ -132,6 +132,7 @@ typedef enum
     INPUT,
     DEFEND,
     TAKE_DAMAGE,
+    DEATH,
     STATE_NUM,
 } State;
 
@@ -167,9 +168,10 @@ typedef struct{
     size_t default_movement_speed_px;
     float height; // in percent from CELL_HEIGHT
     float width; // in percent from CELL_HEIGHT
-    int cpm;     // simulated input speed for NPC
+    float accuracy;     //for npc 
     char damage_text[DEFEND_TEXT_CAPACITY]; // text that thing inputted to successfylly attack
     char defend_text[DEFEND_TEXT_CAPACITY]; // text that thing must input to successfully defend
+    char key_pressed;
 } Thing;
 
 typedef enum
@@ -222,6 +224,17 @@ typedef struct
     thing_idx thing_num;
     size_t animation_num;
 } Game;
+
+size_t get_first_char_idx(char* arr, size_t len);
+size_t get_damage_to_take(Thing* thing)
+{
+    int damage_to_take = 0;
+    for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) 
+    {
+        if(thing->defend_text[char_idx] != 0) damage_to_take++;
+    }
+    return damage_to_take;
+}
 
 void print_debug_attributes(Attributes attr)
 {
@@ -638,41 +651,33 @@ void calc_attributes(Game* game)
             case HIT:
             {
                 thing->attr = HITTING;
-                    int anim_idx = get_animation_idx(game, i);
-                    Animation* anim  = &game->animations[anim_idx];
-                    size_t current_state_dur = anim->duration_frames; 
-                    if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
+                int anim_idx = get_animation_idx(game, i);
+                Animation* anim  = &game->animations[anim_idx];
+                size_t current_state_dur = anim->duration_frames; 
+                if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
+                {
+                    for(thing_idx check_for_hit_thing_idx = 1; check_for_hit_thing_idx  <= (thing_idx)game->thing_num; check_for_hit_thing_idx++)
                     {
-                        for(thing_idx check_for_hit_thing_idx = 1; check_for_hit_thing_idx  <= (thing_idx)game->thing_num; check_for_hit_thing_idx++)
+                        if (i == check_for_hit_thing_idx) continue;  
+                        if (is_in_reach(game, i, check_for_hit_thing_idx))
                         {
-                            if (i == check_for_hit_thing_idx) continue;  
-                            if (is_in_reach(game, i, check_for_hit_thing_idx))
+                            Thing* attacked = &game->things[check_for_hit_thing_idx]; 
+                            for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {attacked->defend_text[char_idx] = 0;}
+                            for (int char_idx = 0; char_idx < thing->damage; char_idx++)
                             {
-                                Thing* attacked = &game->things[check_for_hit_thing_idx]; 
-                                for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {attacked->defend_text[char_idx] = 0;}
-                                for (int char_idx = 0; char_idx < thing->damage; char_idx++)
-                                {
-                                    attacked->defend_text[char_idx] = thing->damage_text[char_idx];
-                                }
-                                state_transition(game, check_for_hit_thing_idx, DEFEND);
+                                attacked->defend_text[char_idx] = thing->damage_text[char_idx];
                             }
+                            state_transition(game, check_for_hit_thing_idx, DEFEND);
                         }
                     }
+                }
                 break;
             }
             default:
             {
-                    // assert(false);
+                thing->attr = IDLING;
             }
         }
-        // if (thing->movement_speed != 0)
-        // {  
-        //     thing->attr |= MOVING; 
-        // }
-        // else
-        // {
-        //     thing->attr = clear_bit(thing->attr, MOVING);
-        // }
         if (!Vector2Equals(thing->orientation, default_orientation)) 
         {
             thing->attr |= LOOKS_LEFT;
@@ -717,7 +722,9 @@ void process_game(Game* game)
             }
             case INPUT:
             {
-                if (game->key_pressed == game->hit_text[thing->hit_text_idx])
+
+                char key_pressed = thing->key_pressed;
+                if (key_pressed == game->hit_text[thing->hit_text_idx])
                 {
                     thing->hit_text_idx = (thing->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
                     thing->damage_text[thing->damage] = game->key_pressed;
@@ -727,13 +734,29 @@ void process_game(Game* game)
             }
             case DEFEND:
             {
-                for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {thing->damage_text[char_idx] = 0;}
+                if ((thing->traits & ENEMY) == ENEMY) break;
+                char key_pressed = thing->key_pressed;
+                size_t ch_idx = get_first_char_idx(thing->defend_text, DEFEND_TEXT_CAPACITY);
+                char defend_text_char = thing->defend_text[ch_idx];
+
+                if (defend_text_char == 0) state_transition(game, i, IDLE);
+                if (key_pressed == defend_text_char)
+                {
+                   thing->defend_text[ch_idx] = 0;
+                }
+                else
+                {
+                    state_transition(game, i, TAKE_DAMAGE);
+                }
                 break;
             }
-            case TAKE_DAMAGE:{}
+            case TAKE_DAMAGE:
+            {
+                break;
+            }
             case HIT:
             {
-
+                break;
             }
             default:
             {
@@ -741,11 +764,11 @@ void process_game(Game* game)
         }
     }   
 }   
-char get_first_char(char* arr, size_t len)
+size_t get_first_char_idx(char* arr, size_t len)
 {
     for (size_t i = 0; i < len; i++)
     {
-        if (arr[i] != 0) return arr[i];
+        if (arr[i] != 0) return i;
     }
     return 0;
 }
@@ -788,7 +811,19 @@ void increment_game(Game* game)
                 }
                 case DEFEND:
                 {
-                    state_transition(game, i, TAKE_DAMAGE);
+                    size_t damage_to_take = get_damage_to_take(thing);
+                    if (damage_to_take != 0) 
+                    {
+                        thing->health -= damage_to_take;
+                        if (thing->health > 0) state_transition(game, i, TAKE_DAMAGE);
+                        // else state_transition(game, i, DEATH);
+                        else state_transition(game, i, TAKE_DAMAGE);
+                    }
+                    else
+                    {
+                        state_transition(game, i, IDLE);
+                    }
+                    for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {thing->defend_text[char_idx] = 0;}
                     break;
                 }
                 default:
@@ -800,54 +835,7 @@ void increment_game(Game* game)
         }
     }
 }
-        //     if (check_bitmask(thing->attr, INPUTTING))
-        //     {
-        //         if (thing->damage != 0) thing->attr |= HITTING;
-        //         thing->attr = clear_bit(thing->attr, INPUTTING);
-        //         if (check_bitmask(thing->attr, HITTING))
-        //         {
-        //             state_transition(game, i);
-        //             continue;
-        //         }
-        //         thing->attr = (thing->movement_speed != 0) ? MOVING : IDLING;
-        //         state_transition(game, i);
-        //         continue;
-        //     }
-        //     else if (check_bitmask(thing->attr, HITTING))
-        //     {
-        //         thing->damage = 0;
-        //         thing->attr = clear_bit(thing->attr, HITTING);
-        //         thing->attr = (thing->movement_speed != 0) ? MOVING : IDLING;
-        //         state_transition(game, i);
-        //         continue;
-        //     }
-        //     else if (check_bitmask(thing->attr, DEFENDING))
-        //     {
-        //         thing->attr = TAKING_DAMAGE;
-        //         state_transition(game, i);
-        //         continue;
-        //     }
-        //     else
-        //     {
-        //         thing->attr = (thing->movement_speed != 0) ? MOVING : IDLING;
-        //         state_transition(game, i);
-        //         continue;
-        //     }
-        //
-        //     // if(old_attr != new_attr) state_transition(game, i);
-        //     state_transition(game, i);
-        // }
-#ifdef DEBUG_ATTR
-        if (new_attr != old_attr)
-        {
-            if(thing->kind == ORC)
-            {
-                TraceLog(LOG_INFO,  "Attributes changed for index %d: old: %d, new: %d ", i, old_attr, new_attr);
-                print_debug_attributes(new_attr);
-            }
-        }
-#endif //DEBUG_ATTR
-
+       
 void init_player(Game* game, thing_idx idx)
 {
     assert(idx == game->thing_num + 1);
@@ -872,6 +860,8 @@ void init_orc(Game* game)
     game->things[idx].orientation.y = 0;
     game->things[idx].traits = ENEMY_TRAITS_DEFAULT;
     game->things[idx].kind = ORC;
+
+    game->things[idx].accuracy = 50;
 } 
 
 
@@ -1049,6 +1039,7 @@ bool is_num_pressed(char key)
 void process_input(Game* game)
 {
     Thing* player = &game->things[game->player_idx];
+    player->key_pressed = game->key_pressed;
     // make sure that hit animation and input animation is not canceled by input
     if ((player->state == INPUT) || (player->state == HIT)) return;
     if (game->key_pressed == 'i') 
@@ -1135,6 +1126,21 @@ void npc_ai(Game* game)
             else
             {
                 thing->movement_speed = 0;
+            }
+            if (thing->state == DEFEND)
+            {
+                for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) 
+                {
+                    if(thing->defend_text[char_idx] == 0) continue;
+                    if ((rand() % 100) < thing->accuracy)
+                    // if (100 < thing->accuracy)
+                    {
+                        thing->defend_text[char_idx] = 0;
+                        continue;
+                    }
+                    else {break;}
+                }
+                thing->state_cnt = 10000000; 
             }
         }
     }
