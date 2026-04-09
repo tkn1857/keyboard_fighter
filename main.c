@@ -58,6 +58,10 @@
 #define FLY_SPEED_PERC_PER_MS                      0.02f 
 #define FLY_INCREMENT_PIXEL_PER_FRAME              ((MS_PER_FRAME*FLY_SPEED_PERC_PER_MS) / 100.0f) * SCREEN_WIDTH
 
+#define DEFENDING_STATE_DURATION_MS                     500
+#define DEFENDING_STATE_FRAMES                      (int)((int)INPUT_MODE_DURATION_MS / (int)MS_PER_FRAME)
+
+
 
 #define ADD_ANCHORS(sprite_set, IMAGE_KIND, ...) \
     do { \
@@ -65,6 +69,9 @@
         assert(sizeof(_anchors_)/sizeof(_anchors_[0]) == (sprite_set).sprites[(IMAGE_KIND)].frame_num); \
         memcpy((sprite_set).sprites[(IMAGE_KIND)].anchors, _anchors_, sizeof(_anchors_)); \
     } while (0)
+
+#define MIN(i, j) (((i) < (j)) ? (i) : (j))
+#define MAX(i, j) (((i) > (j)) ? (i) : (j))
 
 typedef int thing_idx;
 
@@ -80,7 +87,7 @@ const char CHARSET[] =
 
 
 #define CHARSET_SIZE                                (sizeof(CHARSET)/sizeof(CHARSET[0]) - 1)
-
+#define DEFEND_TEXT_CAPACITY                        8
 typedef enum
 {
     DEFAULT_TRAIT = 0,
@@ -105,6 +112,7 @@ typedef enum
     MOVING_FAST = (1<<5),
     INPUT_MOVE = (1<<6),
     FLYING = (1<<7),
+    DEFENDING = (1<<8),
     // TAKING_OFF = (1<<7),
 } Attributes;
 
@@ -121,6 +129,8 @@ typedef enum{
     THING_KIND_NUM
 } ThingKind;
 
+//TODO: change orientation and movement speed to velocity
+//
 typedef struct{
     Traits traits;
     ThingKind kind;
@@ -132,12 +142,13 @@ typedef struct{
     Vector2 orientation;
     float movement_speed;
     thing_idx hit_text_idx;
-    size_t hit_text_size;
-    Rectangle hitbox;
     float reach; // in percent from total stage len
     size_t default_movement_speed_px;
     float height; // in percent from CELL_HEIGHT
     float width; // in percent from CELL_HEIGHT
+    int cpm;     // simulated input speed for NPC
+    char damage_text[DEFEND_TEXT_CAPACITY]; // text that thing inputted to successfylly attack
+    char defend_text[DEFEND_TEXT_CAPACITY]; // text that thing must input to successfully defend
 } Thing;
 
 typedef enum
@@ -147,6 +158,8 @@ typedef enum
     ATTACK_IMAGE,
     WALK_IMAGE,
     JUMP_IMAGE,
+    HURT_IMAGE,
+    DEAD_IMAGE,
     IMAGE_KIND_NUM
 } ImageKind;   
 
@@ -195,6 +208,7 @@ void state_transition(Game* game, thing_idx idx)
     thing->state_cnt = 0;
     game->recorded_num = 0;
 }
+
 bool check_bitmask(int bitmask, int flag)
 {
     return (bitmask & flag) != 0;
@@ -394,17 +408,24 @@ thing_idx get_animation_idx(Game* game, thing_idx idx)
     return best_index;
 }
 
-// Rectangle get_rect_from_animation(Animation* anim, size_t frame_num)
+// thing_idx get_state_duration(Game* game, thing_idx idx)
 // {
-//     // assert(anim->stages_num - 1 >= frame_num);
-//     Rectangle frame_rect = {0};
-//     if (frame_num > anim->sprite_num - 1) frame_num = anim->sprite_num - 1; // understand why this needed
-//     {
-//         frame_rect.x = anchor - anim->figure_width/2;
-//         frame_rect.width =  anim->figure_width;
-//         frame_rect.height = anim->texture.height;
+//     Thing* thing = &game->things[idx];
+//
+//     int best_index = 0;
+//     int max_overlap = -1;
+//
+//     for (size_t i = 0; i < game->animation_num; i++) {
+//         if (!(game->animations[i].kind == thing->kind)) continue;
+//         int overlap = count_bits(game->animations[i].attr & thing->attr);
+//
+//         if (overlap > max_overlap) {
+//             max_overlap = overlap;
+//             best_index = i;
+//         }
 //     }
-//     return frame_rect;
+//
+//     return best_index;
 // }
 
 void draw_hit_text(Game* game)
@@ -461,15 +482,15 @@ void draw_grid(Game* game)
         if(thing->kind != GRID_CELL) continue;
         render_text[0] = game->hit_text[thing->hit_text_idx];
         int text_len_px = MeasureText(render_text, font_size);
-        DrawRectangleLines(thing->position.x - CELL_WIDTH/2, thing->position.y - CELL_HEIGHT/2, CELL_WIDTH, CELL_HEIGHT, outline_color);
-        DrawText(render_text, thing->position.x - text_len_px/2, thing->position.y - font_size/2, font_size, outline_color);
+        DrawRectangleLines(thing->position.x - CELL_WIDTH/2.0f, thing->position.y - CELL_HEIGHT/2.0f, CELL_WIDTH, CELL_HEIGHT, outline_color);
+        DrawText(render_text, thing->position.x - text_len_px/2.0f, thing->position.y - font_size/2.0f, font_size, outline_color);
         // RLAPI void DrawRectangle(int posX, int posY, int width, int height, Color color);
     }
 }
 
 bool draw_things(Game * game)
 {
-    for(thing_idx i = 0; i < MAX_THINGS; i++)
+    for(thing_idx i = 0; i <= game->thing_num; i++)
     {
         Thing * thing = &game->things[i];
         if(thing->kind == DEFAULT_THING_KIND) continue;
@@ -497,8 +518,8 @@ bool draw_things(Game * game)
             float reach_len_px = CELL_WIDTH * thing->reach;
             float dir_x = (thing->orientation.x < 0.0f) ? -1.0f : 1.0f;
             float reach_x = thing->position.x + dir_x * reach_len_px;
-            DrawLineV((Vector2){reach_x, STAGE_COORDINATE - CELL_HEIGHT},
-                      (Vector2){reach_x, STAGE_COORDINATE},
+            DrawLineV((Vector2){reach_x, thing->position.y - CELL_HEIGHT},
+                      (Vector2){reach_x, thing->position.y},
                       PURPLE);
         }
 #endif //DEBUG_THINGS
@@ -513,6 +534,27 @@ void generate_hit_text(Game* game)
        int idx = rand() % CHARSET_SIZE;
        game->hit_text[i] = CHARSET[idx];
     }
+}
+
+bool is_in_reach(Game* game, thing_idx attacker_idx, thing_idx candidate_idx)
+{
+    bool res = false;
+    Thing* attacker = &game->things[attacker_idx];
+    Thing* candidate = &game->things[candidate_idx];
+    // check for reach if attacker can attack 
+    if ( ((attacker->traits & CAN_HIT) == CAN_HIT) && ((attacker->traits & ENEMY) != (candidate->traits & ENEMY)) )
+    {
+        if (fabs(candidate->position.y - attacker->position.y) > candidate->height*CELL_HEIGHT/2.0) return false;
+
+        float reach_len_px = CELL_WIDTH * attacker->reach;
+        float dir_x = (attacker->orientation.x < 0.0f) ? -1.0f : 1.0f;
+        float reach_x = attacker->position.x + dir_x * reach_len_px;
+        float min_x = MIN(attacker->position.x, reach_x);
+        float max_x = MAX(attacker->position.x, reach_x);
+
+        if ((candidate->position.x >= min_x) && (candidate->position.x <= max_x)) return true;
+    }
+    return res;
 }
 
 void calc_attributes(Game* game)
@@ -532,9 +574,21 @@ void calc_attributes(Game* game)
             size_t current_state_dur = anim->duration_frames; 
             if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
             {
-                for(thing_idx check_for_hit_thing = 1; check_for_hit_thing  <= (thing_idx)game->thing_num; check_for_hit_thing++)
+                for(thing_idx check_for_hit_thing_idx = 1; check_for_hit_thing_idx  <= (thing_idx)game->thing_num; check_for_hit_thing_idx++)
                 {
-                             
+                    if (i == check_for_hit_thing_idx) continue;  
+                    if (is_in_reach(game, i, check_for_hit_thing_idx))
+                    {
+                        Thing* attacked = &game->things[check_for_hit_thing_idx]; 
+                        attacked->attr |= DEFENDING;
+                        for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {attacked->defend_text[char_idx] = 0;}
+                        for (int char_idx = 0; char_idx < thing->damage; char_idx++)
+                        {
+                            attacked->defend_text[char_idx] = thing->damage_text[char_idx];
+                        }
+                        state_transition(game, check_for_hit_thing_idx);
+                        
+                    }
                 }
             }
         }
@@ -610,6 +664,14 @@ void increment_game(Game* game)
         // if (anim_idx == -1) continue;
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
+        // if ((thing->attr & DEFENDING) == DEFENDING) 
+        // {
+        //     current_state_dur = DEFENDING_STATE_FRAMES;
+        //     if (current_state_dur <= thing->state_cnt) 
+        //     {
+        //
+        //     }
+        // }
         if (current_state_dur <= thing->state_cnt) 
         {
             thing->damage = 0;
