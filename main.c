@@ -8,7 +8,7 @@
 #include "raymath.h"
 //enable debug view of thing position, hitbox, reach
 #define DEBUG_THINGS
-#define DEBUG_ATTR
+// #define DEBUG_ATTR
 
 #define MAX_THINGS                                  1024
 #define MAX_ANIMATIONS                              1024
@@ -124,6 +124,18 @@ typedef enum
     // TAKING_OFF = (1<<7),
 } Attributes;
 
+typedef enum
+{
+    IDLE = 0,
+    HIT,
+    MOVE,
+    INPUT,
+    DEFEND,
+    TAKE_DAMAGE,
+    STATE_NUM,
+} State;
+
+
 Traits ENEMY_TRAITS_DEFAULT = ENEMY|NPC|POSITIONABLE|HAS_DIRECTION|CAN_HIT;
 Traits PLAYER_TRAITS = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT | CAN_FLY;
 
@@ -143,6 +155,7 @@ typedef struct{
     Traits traits;
     ThingKind kind;
     Attributes attr;
+    State state;
     size_t state_cnt;
     int damage;
     int health;
@@ -240,11 +253,13 @@ void print_debug_attributes(Attributes attr)
 }
 
 
-void state_transition(Game* game, thing_idx idx)
+void state_transition(Game* game, thing_idx idx, State state)
 {
     Thing* thing = &game->things[idx];
     thing->state_cnt = 0;
+    game->key_pressed = 0;
     game->recorded_num = 0;
+    thing->state = state;
 }
 
 bool check_bitmask(int bitmask, int flag)
@@ -612,39 +627,52 @@ void calc_attributes(Game* game)
     for(thing_idx i = 1; i <= (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
-           
-        if (check_bitmask(thing->attr, HITTING))
+        if (thing->movement_speed != 0) thing->state = MOVE;   
+        switch(thing->state)
         {
-            int anim_idx = get_animation_idx(game, i);
-            Animation* anim  = &game->animations[anim_idx];
-            size_t current_state_dur = anim->duration_frames; 
-            if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
+            case IDLE:{thing->attr = IDLING;break;} 
+            case MOVE:{thing->attr = MOVING;break;}
+            case INPUT:{thing->attr = INPUTTING;break;}
+            case DEFEND:{thing->attr = DEFENDING;break;}
+            case TAKE_DAMAGE:{thing->attr = TAKING_DAMAGE;break;}
+            case HIT:
             {
-                for(thing_idx check_for_hit_thing_idx = 1; check_for_hit_thing_idx  <= (thing_idx)game->thing_num; check_for_hit_thing_idx++)
-                {
-                    if (i == check_for_hit_thing_idx) continue;  
-                    if (is_in_reach(game, i, check_for_hit_thing_idx))
+                thing->attr = HITTING;
+                    int anim_idx = get_animation_idx(game, i);
+                    Animation* anim  = &game->animations[anim_idx];
+                    size_t current_state_dur = anim->duration_frames; 
+                    if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
                     {
-                        Thing* attacked = &game->things[check_for_hit_thing_idx]; 
-                        attacked->attr = DEFENDING;
-                        for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {attacked->defend_text[char_idx] = 0;}
-                        for (int char_idx = 0; char_idx < thing->damage; char_idx++)
+                        for(thing_idx check_for_hit_thing_idx = 1; check_for_hit_thing_idx  <= (thing_idx)game->thing_num; check_for_hit_thing_idx++)
                         {
-                            attacked->defend_text[char_idx] = thing->damage_text[char_idx];
+                            if (i == check_for_hit_thing_idx) continue;  
+                            if (is_in_reach(game, i, check_for_hit_thing_idx))
+                            {
+                                Thing* attacked = &game->things[check_for_hit_thing_idx]; 
+                                for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {attacked->defend_text[char_idx] = 0;}
+                                for (int char_idx = 0; char_idx < thing->damage; char_idx++)
+                                {
+                                    attacked->defend_text[char_idx] = thing->damage_text[char_idx];
+                                }
+                                state_transition(game, check_for_hit_thing_idx, DEFEND);
+                            }
                         }
-                        state_transition(game, check_for_hit_thing_idx);
                     }
-                }
+                break;
+            }
+            default:
+            {
+                    // assert(false);
             }
         }
-        if ((thing->movement_speed != 0) && (!check_bitmask(thing->attr, MOVING)))
-        {  
-            thing->attr |= MOVING; 
-        }
-        else
-        {
-            thing->attr = clear_bit(thing->attr, MOVING);
-        }
+        // if (thing->movement_speed != 0)
+        // {  
+        //     thing->attr |= MOVING; 
+        // }
+        // else
+        // {
+        //     thing->attr = clear_bit(thing->attr, MOVING);
+        // }
         if (!Vector2Equals(thing->orientation, default_orientation)) 
         {
             thing->attr |= LOOKS_LEFT;
@@ -673,52 +701,43 @@ void process_game(Game* game)
         int anim_idx = get_animation_idx(game, i);
         // if (anim_idx == -1) continue;
         Animation* anim  = &game->animations[anim_idx];
-        size_t current_state_dur = anim->duration_frames; 
-        
-        if (check_bitmask(thing->attr, DEFENDING))
+        switch(thing->state)
         {
-            thing->movement_speed = 0;
-            thing->damage = 0;
-            for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {thing->damage_text[char_idx] = 0;}
-            continue;
-        }
-        if (check_bitmask(thing->attr, INPUTTING))
-        {
-            if ((current_state_dur == thing->state_cnt) && (thing->damage != 0))
+            case IDLE:{break;} 
+            case MOVE:
             {
-                thing->attr = HITTING;
-                state_transition(game, i);
-                continue;
+                if ((thing->movement_speed == 0) && (check_bitmask(thing->attr, MOVING)))
+                {
+                    thing->state_cnt = anim->duration_frames;
+                }
+                thing->position.x += thing->movement_speed * thing->orientation.x;
+                thing->position.y += thing->movement_speed * thing->orientation.y;
+                if(thing->position.y >= STAGE_COORDINATE) thing->position.y = STAGE_COORDINATE;
+                break;
             }
-            if (game->key_pressed == game->hit_text[thing->hit_text_idx])
+            case INPUT:
             {
-                thing->hit_text_idx = (thing->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
-                thing->damage_text[thing->damage] = game->key_pressed;
-                thing->damage += 1;
-                continue;
+                if (game->key_pressed == game->hit_text[thing->hit_text_idx])
+                {
+                    thing->hit_text_idx = (thing->hit_text_idx + 1) % HIT_TEXT_CAPACITY;
+                    thing->damage_text[thing->damage] = game->key_pressed;
+                    thing->damage += 1;
+                }
+                break;
             }
-        }
-        // if (check_bitmask(thing->attr, HITTING))
-        // {
-        //     if (current_state_dur == thing->state_cnt)
-        //     {
-        //         for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {thing->damage_text[char_idx] = 0;}
-        //     }
-        //     continue;
-        // }
-        
-        if (check_bitmask(thing->attr, MOVING))
-        {
-            // needed to stop immidiately after after walk speed is 0
-            if ((thing->movement_speed == 0) && (check_bitmask(thing->attr, MOVING)))
+            case DEFEND:
             {
-                thing->state_cnt = anim->duration_frames;
+                for (int char_idx = 0; char_idx < DEFEND_TEXT_CAPACITY; char_idx++) {thing->damage_text[char_idx] = 0;}
+                break;
             }
+            case TAKE_DAMAGE:{}
+            case HIT:
+            {
 
-            thing->position.x += thing->movement_speed * thing->orientation.x;
-            thing->position.y += thing->movement_speed * thing->orientation.y;
-            if(thing->position.y >= STAGE_COORDINATE) thing->position.y = STAGE_COORDINATE;
-            continue;
+            }
+            default:
+            {
+            }
         }
     }   
 }   
@@ -737,40 +756,87 @@ void increment_game(Game* game)
     {
         Thing* thing = &game->things[i];
         size_t state_cnt = thing->state_cnt++;
-        Attributes old_attr = thing->attr;
         int anim_idx = get_animation_idx(game, i);
         // if (anim_idx == -1) continue;
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
         if (current_state_dur <= state_cnt) 
         {
-            thing->damage = 0;
-            if(thing->movement_speed == 0)
+            switch(thing->state)
             {
-                thing->attr = clear_bit(thing->attr, MOVING);
-                state_transition(game, i);
+                case INPUT:
+                {
+                    if (thing->damage != 0) state_transition(game, i, HIT);
+                    else
+                    {
+                        state_transition(game, i, IDLE);
+                        thing->damage = 0;
+                    }
+                    break;
+                }
+                case HIT:
+                {
+                    state_transition(game, i, IDLE);
+                    thing->damage = 0;
+                    break;
+                }
+                case MOVE:
+                {
+                    if (thing->movement_speed != 0) state_transition(game, i, MOVE);
+                    else state_transition(game, i, IDLE);
+                    break;
+                }
+                case DEFEND:
+                {
+                    state_transition(game, i, TAKE_DAMAGE);
+                    break;
+                }
+                default:
+                {
+                    state_transition(game, i, IDLE);
+                    break;
+                } 
             }
-            else
-            {
-                thing->attr |= MOVING;
-                state_transition(game, i);
-            }
-            // if (check_bitmask(thing->attr, DEFENDING) && (get_first_char(thing->defend_text, DEFEND_TEXT_CAPACITY) != 0))
-            if (check_bitmask(thing->attr, DEFENDING))
-            {
-                thing->attr = TAKING_DAMAGE;
-                // thing->attr = clear_bit(thing->attr, DEFENDING);
-                state_transition(game, i);
-                // continue;
-            }
-            if (check_bitmask(thing->attr, DEFAULT_ATTR))
-            {
-                thing->attr = IDLING;
-                state_transition(game, i);
-            }
-
         }
-        Attributes new_attr = thing->attr;
+    }
+}
+        //     if (check_bitmask(thing->attr, INPUTTING))
+        //     {
+        //         if (thing->damage != 0) thing->attr |= HITTING;
+        //         thing->attr = clear_bit(thing->attr, INPUTTING);
+        //         if (check_bitmask(thing->attr, HITTING))
+        //         {
+        //             state_transition(game, i);
+        //             continue;
+        //         }
+        //         thing->attr = (thing->movement_speed != 0) ? MOVING : IDLING;
+        //         state_transition(game, i);
+        //         continue;
+        //     }
+        //     else if (check_bitmask(thing->attr, HITTING))
+        //     {
+        //         thing->damage = 0;
+        //         thing->attr = clear_bit(thing->attr, HITTING);
+        //         thing->attr = (thing->movement_speed != 0) ? MOVING : IDLING;
+        //         state_transition(game, i);
+        //         continue;
+        //     }
+        //     else if (check_bitmask(thing->attr, DEFENDING))
+        //     {
+        //         thing->attr = TAKING_DAMAGE;
+        //         state_transition(game, i);
+        //         continue;
+        //     }
+        //     else
+        //     {
+        //         thing->attr = (thing->movement_speed != 0) ? MOVING : IDLING;
+        //         state_transition(game, i);
+        //         continue;
+        //     }
+        //
+        //     // if(old_attr != new_attr) state_transition(game, i);
+        //     state_transition(game, i);
+        // }
 #ifdef DEBUG_ATTR
         if (new_attr != old_attr)
         {
@@ -781,9 +847,6 @@ void increment_game(Game* game)
             }
         }
 #endif //DEBUG_ATTR
-    }
-
-}
 
 void init_player(Game* game, thing_idx idx)
 {
@@ -987,14 +1050,13 @@ void process_input(Game* game)
 {
     Thing* player = &game->things[game->player_idx];
     // make sure that hit animation and input animation is not canceled by input
-    if ((check_bitmask(player->attr, INPUTTING)) || (check_bitmask(player->attr, HITTING))) return;
-    if ((game->key_pressed == 'i') || (is_num_pressed(game->key_pressed)))
+    if ((player->state == INPUT) || (player->state == HIT)) return;
+    if (game->key_pressed == 'i') 
     {
-        if ((check_bitmask(player->attr, IDLING) || (check_bitmask(player->attr, MOVING))))
+        // if ((check_bitmask(player->attr, IDLING) || (check_bitmask(player->attr, MOVING))))
+        if ((player->state == IDLE) || (player->state == MOVE))
         {
-            player->attr = INPUTTING;
-            state_transition(game, game->player_idx);
-            game->key_pressed = 0;
+            state_transition(game, game->player_idx, INPUT);
             if (is_num_pressed(game->key_pressed)) 
             {
                 int key_num = game->key_pressed - 48;
