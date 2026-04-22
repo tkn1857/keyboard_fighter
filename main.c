@@ -20,14 +20,15 @@
 #define SCREEN_HEIGHT                               1024 * 1
 #define LINE_NUMBER_OFFSET                          (int)(SCREEN_WIDTH*0.1)
 
-#define GRID_Y                                      10 
+#define GRID_Y                                      15 
 #define GRID_X                                      30 
 
 #define CELL_HEIGHT                                 (int)(SCREEN_HEIGHT/GRID_Y)  
 #define CELL_WIDTH                                  (int)(SCREEN_WIDTH/GRID_X)
+#define WORLD_UNIT                                  (int)(SCREEN_HEIGHT/GRID_Y)  
 #define GRID_TRANSPARENCY                           20 
 
-#define THING_HEIGHT_DEFAULT		                (int)(CELL_HEIGHT * 0.7)
+#define THING_HEIGHT_DEFAULT		                (int)(CELL_HEIGHT * 2)
 
 #define HIT_TEXT_POSITION_Y                         (int)(CELL_HEIGHT * 0.9)
 #define HIT_TEXT_HEIGHT                             (int)(CELL_HEIGHT * 0.1)
@@ -38,7 +39,7 @@
 #define GOOD_CPM                                    300
 
 #define FRAMERATE                                   60
-#define MS_PER_FRAME                                (1000/FRAMERATE)
+#define MS_PER_FRAME                                (1000.0f/FRAMERATE)
 
 #define HIT_DURATION_MS                             300.0f
 #define HIT_DURATION_FRAMES                         (int)((int)HIT_DURATION_MS / (int)MS_PER_FRAME)
@@ -67,6 +68,9 @@
 
 #define DEFENDING_STATE_DURATION_MS                     500
 #define DEFENDING_STATE_FRAMES                      (int)((int)INPUT_MODE_DURATION_MS / (int)MS_PER_FRAME)
+#define VELOCITY_DECAY_PER_SECOND                   20.0f
+#define GRAVITY_UNITS_PER_SECOND_SQ                 20.0f
+#define MAX_FALL_SPEED_UNITS_PER_SECOND             25.0f
 
 
 
@@ -83,6 +87,8 @@
 typedef int thing_idx;
 
 Vector2 default_orientation = {.x = 1, .y = 0};
+Vector2 ZERO_VECTOR = {.x = 0.0f, .y = 0.0f};
+
 const char CHARSET[] = 
     "abcdefghijklmnopqrstuvwxyz";   // lowercase
     // "ABCDEFGHIJKLMNOPQRSTUVWXYZ"   // uppercase
@@ -118,10 +124,12 @@ typedef enum
     INPUTTING = (1<<4),
     MOVING_FAST = (1<<5),
     INPUT_MOVE = (1<<6),
-    FLYING = (1<<7),
+    TAKING_OFF = (1<<7),
     DEFENDING = (1<<8),
     TAKING_DAMAGE = (1<<9),
-    // TAKING_OFF = (1<<7),
+    IN_THE_AIR = (1<<10),
+    FALLING = (1<<11),
+    // TAKING_OFF = (1<<10),
 } Attributes;
 
 typedef enum
@@ -129,6 +137,8 @@ typedef enum
     IDLE = 0,
     HIT,
     MOVE,
+    // TAKE_OFF_JUMP,
+    // FALLING,
     INPUT,
     DEFEND,
     TAKE_DAMAGE,
@@ -138,7 +148,7 @@ typedef enum
 
 
 Traits ENEMY_TRAITS_DEFAULT = ENEMY|NPC|POSITIONABLE|HAS_DIRECTION|CAN_HIT;
-Traits PLAYER_TRAITS = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT | CAN_FLY;
+Traits PLAYER_TRAITS = HAS_DIRECTION | POSITIONABLE | CONTROLLABLE | CAN_HIT | CAN_FLY | CAN_MOVE;
 
 
 typedef enum{
@@ -162,7 +172,7 @@ typedef struct{
     int health;
     Vector2 position;
     Vector2 orientation;
-    float movement_speed;
+    Vector2 velocity; //WORLD_UNIT per second
     thing_idx hit_text_idx;
     float reach; // in percent from total stage len
     size_t default_movement_speed_px;
@@ -257,7 +267,7 @@ void print_debug_attributes(Attributes attr)
             case INPUTTING: TraceLog(LOG_INFO, "  INPUTTING"); break;
             case MOVING_FAST: TraceLog(LOG_INFO, "  MOVING_FAST"); break;
             case INPUT_MOVE: TraceLog(LOG_INFO, "  INPUT_MOVE"); break;
-            case FLYING: TraceLog(LOG_INFO, "  FLYING"); break;
+            // case FLYING: TraceLog(LOG_INFO, "  FLYING"); break;
             case DEFENDING: TraceLog(LOG_INFO, "  DEFENDING"); break;
             case TAKING_DAMAGE: TraceLog(LOG_INFO, "  TAKING_DAMAGE"); break;
             default: TraceLog(LOG_INFO, "  UNKNOWN_FLAG(0x%X)", flag); break;
@@ -423,6 +433,7 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
             }
             case JUMP_IMAGE:
             {
+#ifdef FLYING_ENABLE
                 size_t fly_anim_texture_index = 0;
                 for(int i = 5;i <= 10; i++) 
                 {
@@ -438,6 +449,17 @@ size_t load_animations(Game* game, SpriteSet sprites, Traits traits)
                         game,
                         traits,
                         FLYING | IDLING | MOVING,
+                        sprites,
+                        JUMP_IMAGE,
+                        FLY_ANIMATION_DURATION_FRAMES,
+                        anchors);
+                break;
+#endif //FLYING_ENABLE
+                for(size_t i = 0;i < sprites.sprites[kind].frame_num; i++) {anchors[i] = sprites.sprites[kind].anchors[i];}
+                num_of_animations = sprite_to_animation(
+                        game,
+                        traits,
+                        TAKING_OFF | IDLING | MOVING,
                         sprites,
                         JUMP_IMAGE,
                         FLY_ANIMATION_DURATION_FRAMES,
@@ -640,11 +662,22 @@ void calc_attributes(Game* game)
     for(thing_idx i = 1; i <= (thing_idx)game->thing_num; i++)
     {
         Thing* thing = &game->things[i];
-        if (thing->movement_speed != 0) thing->state = MOVE;   
+        if (!Vector2Equals(thing->velocity, ZERO_VECTOR)) thing->state = MOVE;
         switch(thing->state)
         {
             case IDLE:{thing->attr = IDLING;break;} 
-            case MOVE:{thing->attr = MOVING;break;}
+            case MOVE:
+            {
+                if((thing->attr & IN_THE_AIR) == IN_THE_AIR)
+                {
+
+                }
+                else
+                {
+                    thing->attr = MOVING;
+                }
+                break;
+            }
             case INPUT:{thing->attr = INPUTTING;break;}
             case DEFEND:{thing->attr = DEFENDING;break;}
             case TAKE_DAMAGE:{thing->attr = TAKING_DAMAGE;break;}
@@ -688,11 +721,11 @@ void calc_attributes(Game* game)
         }
         if (thing->position.y != STAGE_COORDINATE) 
         {
-            thing->attr |= FLYING;
+            thing->attr |= IN_THE_AIR;
         } 
         else 
         {
-            thing->attr = clear_bit(thing->attr, FLYING);
+            thing->attr = clear_bit(thing->attr, IN_THE_AIR);
         }
     }   
 }
@@ -704,25 +737,28 @@ void process_game(Game* game)
     {
         Thing* thing = &game->things[i];
         int anim_idx = get_animation_idx(game, i);
-        // if (anim_idx == -1) continue;
         Animation* anim  = &game->animations[anim_idx];
         switch(thing->state)
         {
             case IDLE:{break;} 
             case MOVE:
             {
-                if ((thing->movement_speed == 0) && (check_bitmask(thing->attr, MOVING)))
+                // Vector2 old_position = thing->position;
+                if (Vector2Equals(thing->velocity, ZERO_VECTOR) && (check_bitmask(thing->attr, MOVING)))
                 {
                     thing->state_cnt = anim->duration_frames;
+                    break;
                 }
-                thing->position.x += thing->movement_speed * thing->orientation.x;
-                thing->position.y += thing->movement_speed * thing->orientation.y;
+                float pixel_inc_x = ((thing->velocity.x * WORLD_UNIT) / 1000.0f ) * MS_PER_FRAME;
+                float pixel_inc_y = ((thing->velocity.y * WORLD_UNIT) / 1000.0f ) * MS_PER_FRAME;
+                thing->position.x += pixel_inc_x;
+                thing->position.y += pixel_inc_y;
+
                 if(thing->position.y >= STAGE_COORDINATE) thing->position.y = STAGE_COORDINATE;
                 break;
             }
             case INPUT:
             {
-
                 char key_pressed = thing->key_pressed;
                 if (key_pressed == game->hit_text[thing->hit_text_idx])
                 {
@@ -773,6 +809,23 @@ size_t get_first_char_idx(char* arr, size_t len)
     return 0;
 }
 
+float apply_x_velocity_decay(float vx)
+{
+    float decay_step = VELOCITY_DECAY_PER_SECOND * (MS_PER_FRAME / 1000.0f);
+    if (vx > 0.0f)
+    {
+        vx -= decay_step;
+        if (vx < 0.0f) vx = 0.0f;
+    }
+    else if (vx < 0.0f)
+    {
+        vx += decay_step;
+        if (vx > 0.0f) vx = 0.0f;
+    }
+
+    return vx;
+}
+
 void increment_game(Game* game)
 {
     for(thing_idx i = 1; i <= game->thing_num; i++)
@@ -780,9 +833,26 @@ void increment_game(Game* game)
         Thing* thing = &game->things[i];
         size_t state_cnt = thing->state_cnt++;
         int anim_idx = get_animation_idx(game, i);
-        // if (anim_idx == -1) continue;
         Animation* anim  = &game->animations[anim_idx];
         size_t current_state_dur = anim->duration_frames;
+        if( ( thing->traits & CAN_MOVE) == CAN_MOVE)
+        {
+            float dt_sec = MS_PER_FRAME / 1000.0f;
+
+            thing->velocity.x = apply_x_velocity_decay(thing->velocity.x);
+            if (thing->position.y < STAGE_COORDINATE)
+            {
+                thing->velocity.y += GRAVITY_UNITS_PER_SECOND_SQ * dt_sec;
+                if (thing->velocity.y > MAX_FALL_SPEED_UNITS_PER_SECOND)
+                {
+                    thing->velocity.y = MAX_FALL_SPEED_UNITS_PER_SECOND;
+                }
+            }
+            else if (thing->velocity.y > 0.0f)
+            {
+                thing->velocity.y = 0.0f;
+            }
+        }
         if (current_state_dur <= state_cnt) 
         {
             switch(thing->state)
@@ -805,7 +875,7 @@ void increment_game(Game* game)
                 }
                 case MOVE:
                 {
-                    if (thing->movement_speed != 0) state_transition(game, i, MOVE);
+                    if (!Vector2Equals(thing->velocity, ZERO_VECTOR)) state_transition(game, i, MOVE);
                     else state_transition(game, i, IDLE);
                     break;
                 }
@@ -844,7 +914,7 @@ void init_player(Game* game, thing_idx idx)
     game->things[idx].orientation.x = 1;
     game->things[idx].orientation.y = 0;
     game->things[idx].attr = IDLING;
-    game->things[idx].movement_speed = 0;
+    game->things[idx].velocity = ZERO_VECTOR;
     game->things[idx].traits = PLAYER_TRAITS;
     game->things[idx].kind = YAMABUSHI;
     // game->things[idx].kind = KNIGHT;
@@ -853,7 +923,7 @@ void init_player(Game* game, thing_idx idx)
 
 void init_orc(Game* game)
 {
-    Vector2 position = {3 * SCREEN_WIDTH/4, STAGE_COORDINATE};
+    Vector2 position = {3.0 * SCREEN_WIDTH/4, STAGE_COORDINATE};
     thing_idx idx = ++game->thing_num;
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
@@ -867,7 +937,7 @@ void init_orc(Game* game)
 
 void init_knight_enemy(Game* game)
 {
-    Vector2 position = {SCREEN_WIDTH/4, STAGE_COORDINATE};
+    Vector2 position = {SCREEN_WIDTH/4.0, STAGE_COORDINATE};
     thing_idx idx = ++game->thing_num;
     game->things[idx].position = position;
     game->things[idx].orientation.x = 1;
@@ -1056,40 +1126,49 @@ void process_input(Game* game)
             return;
         }
     }
-    if (player->movement_speed == 0)
+    // if (Vector2Equals(player->velocity, ZERO_VECTOR))
     {
-        if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)|| IsKeyDown(KEY_K) || IsKeyDown(KEY_J)))
-        {
-            player->movement_speed = WALK_INCREMENT_PIXEL_PER_FRAME;
-        } 
 
         if (IsKeyDown(KEY_L)) 
         {
             player->orientation.x = 1;
             player->orientation.y = 0;
+            player->velocity.x = 1*3;
         }
         if (IsKeyDown(KEY_H)) 
         {
             player->orientation.x = -1;
             player->orientation.y = 0;
+            player->velocity.x = -1*3;
         }
         if (IsKeyDown(KEY_K)) 
         {
+            // state_transition(game, game->player_idx, TAKE_OFF_JUMP);
             player->orientation.x = 0;
             player->orientation.y = -1;
+            player->velocity = Vector2Normalize(player->orientation);
+            player->velocity = Vector2Scale(player->velocity, 8);
+
         }   
-        if (IsKeyDown(KEY_J)) 
-        {
-            player->orientation.x = 0;
-            player->orientation.y = 1;
-        }
+        // if (IsKeyDown(KEY_J)) 
+        // {
+        //     player->orientation.x = 0;
+        //     player->orientation.y = 1;
+        //     player->velocity.y = 1*3;
+        // }
+
+        // if ((IsKeyDown(KEY_L)) || (IsKeyDown(KEY_H)|| IsKeyDown(KEY_J)))
+        // {
+        //     player->velocity = Vector2Normalize(player->orientation);
+        //     player->velocity = Vector2Scale(player->velocity, 3);
+        // } 
     }
-    else
+    // else
     {
-        if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H) && !IsKeyDown(KEY_K) && !IsKeyDown(KEY_J)))
-        {
-            player->movement_speed = 0;
-        }
+        // if ((!IsKeyDown(KEY_L)) && (!IsKeyDown(KEY_H) && !IsKeyDown(KEY_J)))
+        // {
+        //     player->velocity = ZERO_VECTOR;
+        // }
     }
 }
 
@@ -1121,11 +1200,11 @@ void npc_ai(Game* game)
             else dist_to_player = fabs(thing->position.x - player->position.x);
             if (dist_to_player > 64)
             {
-                thing->movement_speed = WALK_INCREMENT_PIXEL_PER_FRAME/2;
+                thing->velocity = Vector2Scale(thing->orientation, 1.0f);
             }
             else
             {
-                thing->movement_speed = 0;
+                thing->velocity = ZERO_VECTOR;
             }
             if (thing->state == DEFEND)
             {

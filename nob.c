@@ -15,7 +15,6 @@ static void usage(void)
 int main(int argc, char **argv)
 {
     GO_REBUILD_URSELF(argc, argv);
-
     bool run = false;
     bool help = false;
     flag_bool_var(&run, "run", false, "Run the program after compilation.");
